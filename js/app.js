@@ -323,7 +323,7 @@ async function handleCategoryListClick(event) {
     const id = button.dataset.categoryId;
     const action = button.dataset.categoryAction;
     if (action === 'edit') {
-      startEditingCategory(id);
+      startInlineEditingCategory(id);
       return;
     }
 
@@ -467,6 +467,112 @@ function startEditingCategory(categoryId) {
   document.getElementById('categoryTopeInput').value = category.tope || 0;
   toggleCategoryTopeInput(Boolean(category.tieneTope));
   document.getElementById('categorySubmitBtn').textContent = 'Guardar cambios';
+}
+
+function closeInlineEditor() {
+  const existing = document.getElementById('inline-category-editor');
+  if (existing) existing.remove();
+  state.editingCategoryId = null;
+}
+
+function startInlineEditingCategory(categoryId) {
+  // Close any other inline editor first
+  closeInlineEditor();
+
+  const category = state.categories.find((item) => item.id === categoryId);
+  if (!category) return;
+
+  state.editingCategoryId = categoryId;
+
+  // find the category row to insert the editor after
+  const triggerBtn = document.querySelector(`button[data-category-id="${categoryId}"]`);
+  const row = triggerBtn ? triggerBtn.closest('.category-item') : null;
+  if (!row) return;
+
+  const container = document.createElement('div');
+  container.id = 'inline-category-editor';
+  container.className = 'card inline-editor';
+  container.innerHTML = `
+    <form id="inline-form-${categoryId}" class="inline-category-form">
+      <div class="grid-2">
+        <div class="field">
+          <label>Nombre</label>
+          <input type="text" name="name" value="${escapeHtml(category.nombre)}" />
+        </div>
+        <div class="field inline">
+          <label class="checkbox-row"><input type="checkbox" name="hasTope" ${category.tieneTope ? 'checked' : ''} /> Tiene tope</label>
+        </div>
+      </div>
+      <div class="field" id="inline-tope-group-${categoryId}" style="margin-top:0.6rem;">
+        <label>Monto del tope</label>
+        <input type="number" name="tope" value="${category.tope || 0}" min="0" step="0.01" />
+      </div>
+      <div style="display:flex;gap:0.6rem;margin-top:0.6rem;">
+        <button type="submit" class="primary">Guardar</button>
+        <button type="button" class="ghost" id="inline-cancel-btn">Cancelar</button>
+      </div>
+    </form>
+  `;
+
+  row.insertAdjacentElement('afterend', container);
+
+  const form = container.querySelector('form');
+  const nameInput = form.querySelector('input[name="name"]');
+  const hasTopeInput = form.querySelector('input[name="hasTope"]');
+  const topeInput = form.querySelector('input[name="tope"]');
+  const topeGroup = document.getElementById(`inline-tope-group-${categoryId}`);
+
+  function toggleInlineTope() {
+    if (hasTopeInput.checked) {
+      topeGroup.style.display = '';
+    } else {
+      topeGroup.style.display = 'none';
+    }
+  }
+
+  toggleInlineTope();
+  hasTopeInput.addEventListener('change', toggleInlineTope);
+
+  // focus name input
+  nameInput.focus();
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const name = nameInput.value.trim();
+    const hasTope = Boolean(hasTopeInput.checked);
+    const tope = Number(topeInput.value || 0);
+
+    if (!name) return;
+
+    const categories = [...state.categories];
+    const index = categories.findIndex((c) => c.id === categoryId);
+    if (index >= 0) {
+      categories[index] = {
+        ...categories[index],
+        nombre: name,
+        tieneTope: hasTope,
+        tope: hasTope ? tope : 0,
+        activa: categories[index].activa !== false
+      };
+    }
+
+    await getUserCategoriesDoc().set({ items: categories }, { merge: true });
+    state.categories = categories;
+    closeInlineEditor();
+    renderCategoriesList();
+    renderCategorySelect();
+    await loadMonthData();
+  });
+
+  container.querySelector('#inline-cancel-btn').addEventListener('click', () => {
+    closeInlineEditor();
+  });
+}
+
+// small helper to escape HTML in values
+function escapeHtml(text) {
+  if (typeof text !== 'string') return text;
+  return text.replace(/[&<>"]/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 }
 
 function buildCategoryId(name, categories) {
