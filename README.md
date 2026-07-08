@@ -1,4 +1,4 @@
-# Sobres
+# Vuelto
 
 Aplicación web simple para controlar gastos personales con HTML, CSS y JavaScript vanilla, Firebase Auth y Firestore.
 
