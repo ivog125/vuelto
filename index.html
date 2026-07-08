@@ -30,6 +30,23 @@
           </label>
           <button type="submit" class="primary">Entrar</button>
         </form>
+
+        <form id="registerForm" class="stack hidden">
+          <label class="field">
+            <span>Email</span>
+            <input id="registerEmailInput" type="email" autocomplete="email" required />
+          </label>
+          <label class="field">
+            <span>Contraseña</span>
+            <input id="registerPasswordInput" type="password" autocomplete="new-password" required />
+          </label>
+          <button type="submit" class="primary">Crear cuenta</button>
+        </form>
+
+        <p class="message">
+          <span id="loginToggleText">¿No tenés cuenta? <a href="#" id="showRegisterLink">Crear cuenta nueva</a></span>
+          <span id="registerToggleText" class="hidden">¿Ya tenés cuenta? <a href="#" id="showLoginLink">Ingresar</a></span>
+        </p>
         <p id="authMessage" class="message"></p>
       </section>
 

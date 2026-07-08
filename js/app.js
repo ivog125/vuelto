@@ -60,6 +60,11 @@ function initializeApp() {
     loginForm: document.getElementById('loginForm'),
     emailInput: document.getElementById('emailInput'),
     passwordInput: document.getElementById('passwordInput'),
+    registerForm: document.getElementById('registerForm'),
+    registerEmailInput: document.getElementById('registerEmailInput'),
+    registerPasswordInput: document.getElementById('registerPasswordInput'),
+    showRegisterLink: document.getElementById('showRegisterLink'),
+    showLoginLink: document.getElementById('showLoginLink'),
     authMessage: document.getElementById('authMessage'),
     saveConfigBtn: document.getElementById('saveConfigBtn'),
     expenseForm: document.getElementById('expenseForm'),
@@ -111,6 +116,15 @@ function initializeApp() {
 
 function bindEvents(elements) {
   elements.loginForm.addEventListener('submit', handleLogin);
+  elements.registerForm.addEventListener('submit', handleRegister);
+  elements.showRegisterLink.addEventListener('click', (event) => {
+    event.preventDefault();
+    showRegisterForm();
+  });
+  elements.showLoginLink.addEventListener('click', (event) => {
+    event.preventDefault();
+    showLoginForm();
+  });
   elements.logoutBtn.addEventListener('click', handleLogout);
   elements.saveConfigBtn.addEventListener('click', handleSaveConfig);
   elements.expenseForm.addEventListener('submit', handleExpenseSubmit);
@@ -142,13 +156,60 @@ async function handleLogin(event) {
   }
 }
 
+async function handleRegister(event) {
+  event.preventDefault();
+  const email = document.getElementById('registerEmailInput').value.trim();
+  const password = document.getElementById('registerPasswordInput').value;
+  const message = document.getElementById('authMessage');
+
+  try {
+    await state.auth.createUserWithEmailAndPassword(email, password);
+    message.textContent = '';
+  } catch (error) {
+    message.textContent = error.message;
+  }
+}
+
 function handleLogout() {
   state.auth.signOut();
 }
 
+function showLoginForm() {
+  document.getElementById('loginForm').classList.remove('hidden');
+  document.getElementById('registerForm').classList.add('hidden');
+  document.getElementById('loginToggleText').classList.remove('hidden');
+  document.getElementById('registerToggleText').classList.add('hidden');
+}
+
+function showRegisterForm() {
+  document.getElementById('loginForm').classList.add('hidden');
+  document.getElementById('registerForm').classList.remove('hidden');
+  document.getElementById('loginToggleText').classList.add('hidden');
+  document.getElementById('registerToggleText').classList.remove('hidden');
+}
+
+function getCurrentUserUid() {
+  if (!state.user || !state.user.uid) {
+    throw new Error('Usuario no autenticado: no se puede acceder a la colección de usuario.');
+  }
+  return state.user.uid;
+}
+
+function getUserCollection(collectionName) {
+  return state.db.collection('users').doc(getCurrentUserUid()).collection(collectionName);
+}
+
+function getUserConfigDoc(docId) {
+  return getUserCollection('config').doc(docId);
+}
+
+function getUserCategoriesDoc() {
+  return getUserConfigDoc('categorias');
+}
+
 async function handleSaveConfig() {
   const payload = collectConfigValues();
-  const configRef = state.db.collection('config').doc(state.currentMonth);
+  const configRef = getUserConfigDoc(state.currentMonth);
   await configRef.set(payload, { merge: true });
   await loadMonthData();
 }
@@ -167,7 +228,7 @@ async function handleExpenseSubmit(event) {
     return;
   }
 
-  await state.db.collection('gastos').add(payload);
+  await getUserCollection('gastos').add(payload);
   event.target.reset();
   setDefaultDate();
   await loadMonthData();
@@ -186,7 +247,7 @@ async function handleIncomeSubmit(event) {
     return;
   }
 
-  await state.db.collection('ingresos').add(payload);
+  await getUserCollection('ingresos').add(payload);
   event.target.reset();
   setDefaultDate();
   await loadMonthData();
@@ -198,7 +259,7 @@ async function handleDeleteMovement(event) {
     return;
   }
   const id = button.dataset.deleteId;
-  await state.db.collection('gastos').doc(id).delete();
+  await getUserCollection('gastos').doc(id).delete();
   await loadMonthData();
 }
 
@@ -234,7 +295,7 @@ async function handleCategorySubmit(event) {
     });
   }
 
-  await state.db.collection('config').doc('categorias').set({ items: categories }, { merge: true });
+  await getUserCategoriesDoc().set({ items: categories }, { merge: true });
   state.categories = categories;
   state.editingCategoryId = null;
   resetCategoryForm();
@@ -260,7 +321,7 @@ async function handleCategoryListClick(event) {
     const categories = state.categories.map((category) => (
       category.id === id ? { ...category, activa: false } : category
     ));
-    await state.db.collection('config').doc('categorias').set({ items: categories }, { merge: true });
+    await getUserCategoriesDoc().set({ items: categories }, { merge: true });
     state.categories = categories;
     renderCategoriesList();
     renderCategorySelect();
@@ -444,10 +505,10 @@ async function loadMonthData() {
 
   const historyMonths = getRecentMonths(6);
   const [configSnap, expensesSnap, incomesSnap, categoriesSnap] = await Promise.all([
-    state.db.collection('config').doc(state.currentMonth).get(),
-    state.db.collection('gastos').where('mes', 'in', historyMonths).get(),
-    state.db.collection('ingresos').where('mes', '==', state.currentMonth).get(),
-    state.db.collection('config').doc('categorias').get()
+    getUserConfigDoc(state.currentMonth).get(),
+    getUserCollection('gastos').where('mes', 'in', historyMonths).get(),
+    getUserCollection('ingresos').where('mes', '==', state.currentMonth).get(),
+    getUserCategoriesDoc().get()
   ]);
 
   let configData = configSnap.exists ? configSnap.data() : null;
@@ -473,14 +534,14 @@ async function loadMonthData() {
 }
 
 async function ensureConfigForMonth(monthKey) {
-  const configRef = state.db.collection('config').doc(monthKey);
+  const configRef = getUserConfigDoc(monthKey);
   const existing = await configRef.get();
   if (existing.exists) {
     return existing.data();
   }
 
   const previousMonth = getPreviousMonthKey(monthKey);
-  const previousSnap = await state.db.collection('config').doc(previousMonth).get();
+  const previousSnap = await getUserConfigDoc(previousMonth).get();
   const source = previousSnap.exists ? previousSnap.data() : DEFAULT_CONFIG;
   const payload = {
     ...DEFAULT_CONFIG,
@@ -495,7 +556,7 @@ async function ensureConfigForMonth(monthKey) {
 }
 
 async function ensureCategoriesConfig(configData, categoriesSnap) {
-  const categoriesRef = state.db.collection('config').doc('categorias');
+  const categoriesRef = getUserCategoriesDoc();
   if (categoriesSnap && categoriesSnap.exists && Array.isArray(categoriesSnap.data().items)) {
     return normalizeCategories(categoriesSnap.data().items);
   }
@@ -709,6 +770,37 @@ function normalizeCategoryValue(value) {
     .toLowerCase()
     .normalize('NFKD')
     .replace(/[^a-z0-9]+/g, '');
+}
+
+function normalizeCategories(items) {
+  if (!Array.isArray(items)) {
+    return [];
+  }
+
+  const seenIds = new Set();
+  return items.map((item, index) => {
+    const rawName = String(item?.nombre || '').trim();
+    const nombre = rawName || `Categoría ${index + 1}`;
+    const rawId = String(item?.id || nombre).trim();
+    const baseId = normalizeCategoryValue(rawId) || `categoria${index + 1}`;
+
+    let id = baseId;
+    let suffix = 2;
+    while (seenIds.has(id)) {
+      id = `${baseId}${suffix}`;
+      suffix += 1;
+    }
+    seenIds.add(id);
+
+    return {
+      ...item,
+      id,
+      nombre,
+      tieneTope: Boolean(item?.tieneTope),
+      tope: Number(item?.tope || 0),
+      activa: item?.activa !== false
+    };
+  });
 }
 
 function getCategoryDisplayName(categoryValue) {
