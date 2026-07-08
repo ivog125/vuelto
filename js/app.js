@@ -69,6 +69,11 @@ function initializeApp() {
     saveConfigBtn: document.getElementById('saveConfigBtn'),
     expenseForm: document.getElementById('expenseForm'),
     incomeForm: document.getElementById('incomeForm'),
+    tarjetaForm: document.getElementById('tarjetaForm'),
+    tarjetaDate: document.getElementById('tarjetaDate'),
+    tarjetaDescription: document.getElementById('tarjetaDescription'),
+    tarjetaAmount: document.getElementById('tarjetaAmount'),
+    tarjetaList: document.getElementById('tarjetaList'),
     monthSelect: document.getElementById('monthSelect'),
     summaryCards: document.getElementById('summaryCards'),
     budgetSection: document.getElementById('budgetSection'),
@@ -86,6 +91,7 @@ function initializeApp() {
     summarySection: document.getElementById('summarySection'),
     settingsSection: document.getElementById('settingsSection'),
     tabRegisterBtn: document.getElementById('tabRegisterBtn'),
+    tabTarjetaBtn: document.getElementById('tabTarjetaBtn'),
     tabSummaryBtn: document.getElementById('tabSummaryBtn'),
     tabSettingsBtn: document.getElementById('tabSettingsBtn')
   };
@@ -125,6 +131,9 @@ function bindEvents(elements) {
     event.preventDefault();
     showLoginForm();
   });
+  elements.tabTarjetaBtn?.addEventListener('click', () => showTab('tarjeta'));
+  elements.tarjetaForm?.addEventListener('submit', handleTarjetaSubmit);
+  elements.tarjetaList?.addEventListener('click', handleTarjetaListClick);
   elements.logoutBtn.addEventListener('click', handleLogout);
   elements.saveConfigBtn.addEventListener('click', handleSaveConfig);
   elements.expenseForm.addEventListener('submit', handleExpenseSubmit);
@@ -337,18 +346,23 @@ function showAuthenticatedView(elements) {
 
 function showTab(tab) {
   const registerSection = document.getElementById('registerSection');
+  const tarjetaSection = document.getElementById('tarjetaSection');
   const summarySection = document.getElementById('summarySection');
   const settingsSection = document.getElementById('settingsSection');
   const tabRegisterBtn = document.getElementById('tabRegisterBtn');
+  const tabTarjetaBtn = document.getElementById('tabTarjetaBtn');
   const tabSummaryBtn = document.getElementById('tabSummaryBtn');
   const tabSettingsBtn = document.getElementById('tabSettingsBtn');
 
-  [registerSection, summarySection, settingsSection].forEach((section) => section.classList.add('hidden'));
-  [tabRegisterBtn, tabSummaryBtn, tabSettingsBtn].forEach((btn) => btn.classList.remove('active'));
+  [registerSection, tarjetaSection, summarySection, settingsSection].forEach((section) => section.classList.add('hidden'));
+  [tabRegisterBtn, tabTarjetaBtn, tabSummaryBtn, tabSettingsBtn].forEach((btn) => btn.classList.remove('active'));
 
   if (tab === 'summary') {
     summarySection.classList.remove('hidden');
     tabSummaryBtn.classList.add('active');
+  } else if (tab === 'tarjeta') {
+    tarjetaSection.classList.remove('hidden');
+    tabTarjetaBtn.classList.add('active');
   } else if (tab === 'settings') {
     settingsSection.classList.remove('hidden');
     tabSettingsBtn.classList.add('active');
@@ -472,6 +486,8 @@ function setDefaultDate() {
   const today = new Date().toISOString().slice(0, 10);
   document.getElementById('expenseDate').value = today;
   document.getElementById('incomeDate').value = today;
+  const tarjetaDateEl = document.getElementById('tarjetaDate');
+  if (tarjetaDateEl) tarjetaDateEl.value = today;
 }
 
 function collectConfigValues() {
@@ -504,11 +520,12 @@ async function loadMonthData() {
   }
 
   const historyMonths = getRecentMonths(6);
-  const [configSnap, expensesSnap, incomesSnap, categoriesSnap] = await Promise.all([
+  const [configSnap, expensesSnap, incomesSnap, categoriesSnap, tarjetaSnap] = await Promise.all([
     getUserConfigDoc(state.currentMonth).get(),
     getUserCollection('gastos').where('mes', 'in', historyMonths).get(),
     getUserCollection('ingresos').where('mes', '==', state.currentMonth).get(),
-    getUserCategoriesDoc().get()
+    getUserCategoriesDoc().get(),
+    getUserCollection('tarjeta').where('mes', '==', state.currentMonth).get()
   ]);
 
   let configData = configSnap.exists ? configSnap.data() : null;
@@ -517,6 +534,10 @@ async function loadMonthData() {
   }
 
   state.categories = await ensureCategoriesConfig(configData, categoriesSnap);
+
+  state.tarjeta = tarjetaSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }))
+    .filter((t) => t.mes === state.currentMonth)
+    .sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
 
   const allExpenses = expensesSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
   state.expenses = allExpenses
@@ -531,6 +552,7 @@ async function loadMonthData() {
   renderCategoriesList();
   renderSummary(configData, state.expenses, state.incomes);
   renderHistory(allExpenses);
+  renderTarjetaMovements(state.tarjeta);
 }
 
 async function ensureConfigForMonth(monthKey) {
@@ -606,11 +628,12 @@ function renderSummary(config, expenses, incomes) {
   const sueldo = Number(config.sueldo || 0);
   const fijos = Number(config.fijos || 0);
   const deuda = Number(config.deuda || 0);
+  const tarjetaTotal = (state.tarjeta || []).reduce((sum, t) => sum + Number(t.monto || 0), 0);
   const ingresoExtraTotal = incomes.reduce((sum, income) => sum + Number(income.monto || 0), 0);
   const ahorroAmount = config.ahorroModo === 'fijo'
     ? Number(config.ahorroMontoFijo || 0)
     : (sueldo * Number(config.ahorroPct || 0)) / 100;
-  const fixedAndSavingsTotal = fijos + deuda + ahorroAmount;
+  const fixedAndSavingsTotal = fijos + tarjetaTotal + deuda + ahorroAmount;
   const variableTotal = expenses
     .filter((expense) => isActiveVariableCategory(expense.categoria))
     .reduce((sum, expense) => sum + Number(expense.monto || 0), 0);
@@ -619,7 +642,7 @@ function renderSummary(config, expenses, incomes) {
   const cards = [
     { label: 'Sueldo', value: formatCurrency(sueldo) },
     { label: 'Ingreso extra del mes', value: formatCurrency(ingresoExtraTotal) },
-    { label: 'Fijos + deuda + ahorro', value: formatCurrency(fixedAndSavingsTotal), subText: getAhorroSummaryText(config, ahorroAmount) },
+    { label: 'Fijos + tarjeta + deuda + ahorro', value: formatCurrency(fixedAndSavingsTotal), subText: getAhorroSummaryText(config, ahorroAmount) },
     { label: 'Gasto variable', value: formatCurrency(variableTotal) },
     { label: 'Margen restante', value: formatCurrency(remainingMargin), negative: remainingMargin < 0 }
   ];
@@ -698,6 +721,56 @@ function renderMovements(expenses) {
       </div>
     `)
     .join('');
+}
+
+function renderTarjetaMovements(tarjeta) {
+  const list = document.getElementById('tarjetaList');
+  if (!tarjeta || !tarjeta.length) {
+    list.innerHTML = '<p class="message">Todavía no hay movimientos de tarjeta en este mes.</p>';
+    return;
+  }
+
+  list.innerHTML = tarjeta
+    .map((item) => `
+      <div class="movement-item">
+        <div>
+          <strong>${item.descripcion}</strong>
+          <div class="movement-meta">${formatDate(item.fecha)}</div>
+        </div>
+        <div class="movement-meta">
+          <div>${formatCurrency(item.monto)}</div>
+          <button class="delete-btn" type="button" data-tarjeta-delete-id="${item.id}">Borrar</button>
+        </div>
+      </div>
+    `)
+    .join('');
+}
+
+async function handleTarjetaSubmit(event) {
+  event.preventDefault();
+  const payload = {
+    fecha: document.getElementById('tarjetaDate').value,
+    descripcion: document.getElementById('tarjetaDescription').value.trim(),
+    monto: Number(document.getElementById('tarjetaAmount').value),
+    mes: state.currentMonth
+  };
+
+  if (!payload.fecha || !payload.descripcion || !payload.monto) {
+    return;
+  }
+
+  await getUserCollection('tarjeta').add(payload);
+  event.target.reset();
+  setDefaultDate();
+  await loadMonthData();
+}
+
+async function handleTarjetaListClick(event) {
+  const button = event.target.closest('[data-tarjeta-delete-id]');
+  if (!button) return;
+  const id = button.dataset.tarjetaDeleteId;
+  await getUserCollection('tarjeta').doc(id).delete();
+  await loadMonthData();
 }
 
 function renderHistory(expenses) {

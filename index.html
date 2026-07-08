@@ -53,6 +53,7 @@
       <main id="app" class="hidden">
         <div class="tabs" role="tablist" aria-label="Secciones">
           <button id="tabRegisterBtn" class="tab-btn active" type="button">Registrar</button>
+          <button id="tabTarjetaBtn" class="tab-btn" type="button">Tarjeta</button>
           <button id="tabSummaryBtn" class="tab-btn" type="button">Resumen</button>
           <button id="tabSettingsBtn" class="tab-btn" type="button">Ajustes</button>
         </div>
@@ -101,6 +102,39 @@
               </label>
               <button type="submit" class="primary">Guardar ingreso</button>
             </form>
+          </div>
+        </section>
+
+        <section id="tarjetaSection" class="card hidden">
+          <div class="section-head">
+            <h2>Tarjeta</h2>
+          </div>
+          <div class="stack">
+            <form id="tarjetaForm" class="stack">
+              <h3>Gasto de tarjeta</h3>
+              <div class="grid-2">
+                <label class="field">
+                  <span>Fecha</span>
+                  <input id="tarjetaDate" type="date" required />
+                </label>
+                <label class="field">
+                  <span>Monto</span>
+                  <input id="tarjetaAmount" type="number" step="0.01" min="0" required />
+                </label>
+              </div>
+              <label class="field">
+                <span>Descripción</span>
+                <input id="tarjetaDescription" type="text" maxlength="80" required />
+              </label>
+              <button type="submit" class="primary">Guardar gasto tarjeta</button>
+            </form>
+
+            <div class="list-card">
+              <div class="section-head compact">
+                <h3>Movimientos de tarjeta</h3>
+              </div>
+              <div id="tarjetaList" class="movement-list"></div>
+            </div>
           </div>
         </section>
 
