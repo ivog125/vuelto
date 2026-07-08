@@ -10,7 +10,15 @@ const CATEGORY_LABELS = {
   FIJOS: 'Fijos'
 };
 
-const VARIABLE_CATEGORIES = ['NAFTA', 'FUTBOL', 'COMPRAS', 'COMIDA', 'OCIO', 'VARIOS'];
+const DEFAULT_CATEGORY_DEFINITIONS = [
+  { id: 'nafta', nombre: 'Nafta', tieneTope: true, tope: 0, activa: true },
+  { id: 'futbol', nombre: 'Fútbol', tieneTope: true, tope: 0, activa: true },
+  { id: 'compras', nombre: 'Compras', tieneTope: true, tope: 0, activa: true },
+  { id: 'comida', nombre: 'Comida', tieneTope: false, tope: 0, activa: true },
+  { id: 'ocio', nombre: 'Ocio', tieneTope: false, tope: 0, activa: true },
+  { id: 'varios', nombre: 'Varios', tieneTope: false, tope: 0, activa: true }
+];
+
 const DEFAULT_CONFIG = {
   sueldo: 0,
   fijos: 0,
@@ -30,7 +38,8 @@ const state = {
   currentMonth: getMonthKey(new Date()),
   chart: null,
   expenses: [],
-  incomes: []
+  incomes: [],
+  categories: []
 };
 
 const firebaseConfig = {
@@ -60,6 +69,14 @@ function initializeApp() {
     budgetSection: document.getElementById('budgetSection'),
     extraSection: document.getElementById('extraSection'),
     movementsList: document.getElementById('movementsList'),
+    expenseCategorySelect: document.getElementById('expenseCategory'),
+    categoriesList: document.getElementById('categoriesList'),
+    categoryForm: document.getElementById('categoryForm'),
+    categoryNameInput: document.getElementById('categoryNameInput'),
+    categoryHasTopeInput: document.getElementById('categoryHasTopeInput'),
+    categoryTopeInput: document.getElementById('categoryTopeInput'),
+    categoryTopeGroup: document.getElementById('categoryTopeGroup'),
+    categorySubmitBtn: document.getElementById('categorySubmitBtn'),
     registerSection: document.getElementById('registerSection'),
     summarySection: document.getElementById('summarySection'),
     settingsSection: document.getElementById('settingsSection'),
@@ -103,6 +120,9 @@ function bindEvents(elements) {
     loadMonthData();
   });
   elements.movementsList.addEventListener('click', handleDeleteMovement);
+  elements.categoriesList.addEventListener('click', handleCategoryListClick);
+  elements.categoryForm.addEventListener('submit', handleCategorySubmit);
+  elements.categoryHasTopeInput.addEventListener('change', () => toggleCategoryTopeInput(elements.categoryHasTopeInput.checked));
   elements.tabRegisterBtn.addEventListener('click', () => showTab('register'));
   elements.tabSummaryBtn.addEventListener('click', () => showTab('summary'));
   elements.tabSettingsBtn.addEventListener('click', () => showTab('settings'));
@@ -182,6 +202,72 @@ async function handleDeleteMovement(event) {
   await loadMonthData();
 }
 
+async function handleCategorySubmit(event) {
+  event.preventDefault();
+  const name = document.getElementById('categoryNameInput').value.trim();
+  const hasTope = document.getElementById('categoryHasTopeInput').checked;
+  const tope = Number(document.getElementById('categoryTopeInput').value || 0);
+
+  if (!name) {
+    return;
+  }
+
+  const categories = [...state.categories];
+  if (state.editingCategoryId) {
+    const index = categories.findIndex((category) => category.id === state.editingCategoryId);
+    if (index >= 0) {
+      categories[index] = {
+        ...categories[index],
+        nombre: name,
+        tieneTope: hasTope,
+        tope: hasTope ? tope : 0,
+        activa: categories[index].activa !== false
+      };
+    }
+  } else {
+    categories.push({
+      id: buildCategoryId(name, categories),
+      nombre: name,
+      tieneTope: hasTope,
+      tope: hasTope ? tope : 0,
+      activa: true
+    });
+  }
+
+  await state.db.collection('config').doc('categorias').set({ items: categories }, { merge: true });
+  state.categories = categories;
+  state.editingCategoryId = null;
+  resetCategoryForm();
+  renderCategoriesList();
+  renderCategorySelect();
+  await loadMonthData();
+}
+
+async function handleCategoryListClick(event) {
+  const button = event.target.closest('[data-category-action]');
+  if (!button) {
+    return;
+  }
+
+  const id = button.dataset.categoryId;
+  const action = button.dataset.categoryAction;
+  if (action === 'edit') {
+    startEditingCategory(id);
+    return;
+  }
+
+  if (action === 'delete') {
+    const categories = state.categories.map((category) => (
+      category.id === id ? { ...category, activa: false } : category
+    ));
+    await state.db.collection('config').doc('categorias').set({ items: categories }, { merge: true });
+    state.categories = categories;
+    renderCategoriesList();
+    renderCategorySelect();
+    await loadMonthData();
+  }
+}
+
 function showAuthenticatedView(elements) {
   elements.authCard.classList.add('hidden');
   elements.app.classList.remove('hidden');
@@ -215,6 +301,95 @@ function showLoginView(elements) {
   elements.authCard.classList.remove('hidden');
   elements.app.classList.add('hidden');
   elements.logoutBtn.classList.add('hidden');
+}
+
+function toggleCategoryTopeInput(visible) {
+  const group = document.getElementById('categoryTopeGroup');
+  if (visible) {
+    group.classList.remove('hidden');
+  } else {
+    group.classList.add('hidden');
+  }
+}
+
+function resetCategoryForm() {
+  document.getElementById('categoryForm').reset();
+  document.getElementById('categoryTopeGroup').classList.add('hidden');
+  document.getElementById('categorySubmitBtn').textContent = 'Agregar categoría';
+  state.editingCategoryId = null;
+}
+
+function startEditingCategory(categoryId) {
+  const category = state.categories.find((item) => item.id === categoryId);
+  if (!category) {
+    return;
+  }
+
+  state.editingCategoryId = categoryId;
+  document.getElementById('categoryNameInput').value = category.nombre;
+  document.getElementById('categoryHasTopeInput').checked = Boolean(category.tieneTope);
+  document.getElementById('categoryTopeInput').value = category.tope || 0;
+  toggleCategoryTopeInput(Boolean(category.tieneTope));
+  document.getElementById('categorySubmitBtn').textContent = 'Guardar cambios';
+}
+
+function buildCategoryId(name, categories) {
+  const base = name
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[^a-z0-9]+/g, '')
+    .slice(0, 20);
+
+  const baseId = base || 'categoria';
+  const existingIds = categories.map((category) => category.id);
+  if (!existingIds.includes(baseId)) {
+    return baseId;
+  }
+
+  let suffix = 2;
+  let candidate = `${baseId}${suffix}`;
+  while (existingIds.includes(candidate)) {
+    suffix += 1;
+    candidate = `${baseId}${suffix}`;
+  }
+  return candidate;
+}
+
+function renderCategorySelect() {
+  const select = document.getElementById('expenseCategory');
+  const activeCategories = state.categories.filter((category) => category.activa !== false);
+  select.innerHTML = activeCategories
+    .map((category) => `<option value="${category.id}">${category.nombre}</option>`)
+    .join('');
+
+  if (!select.value && activeCategories.length) {
+    select.value = activeCategories[0].id;
+  }
+}
+
+function renderCategoriesList() {
+  const list = document.getElementById('categoriesList');
+  const categories = state.categories.filter((category) => category.activa !== false);
+
+  if (!categories.length) {
+    list.innerHTML = '<p class="message">Todavía no hay categorías variables.</p>';
+    return;
+  }
+
+  list.innerHTML = categories
+    .map((category) => `
+      <div class="category-item">
+        <div>
+          <strong>${category.nombre}</strong>
+          <div class="movement-meta">${category.tieneTope ? `Tope: ${formatCurrency(category.tope || 0)}` : 'Sin tope'}</div>
+        </div>
+        <div class="category-actions">
+          <button class="ghost" type="button" data-category-action="edit" data-category-id="${category.id}">Editar</button>
+          <button class="delete-btn" type="button" data-category-action="delete" data-category-id="${category.id}">Borrar</button>
+        </div>
+      </div>
+    `)
+    .join('');
 }
 
 function populateMonthSelect(select) {
@@ -268,16 +443,19 @@ async function loadMonthData() {
   }
 
   const historyMonths = getRecentMonths(6);
-  const [configSnap, expensesSnap, incomesSnap] = await Promise.all([
+  const [configSnap, expensesSnap, incomesSnap, categoriesSnap] = await Promise.all([
     state.db.collection('config').doc(state.currentMonth).get(),
     state.db.collection('gastos').where('mes', 'in', historyMonths).get(),
-    state.db.collection('ingresos').where('mes', '==', state.currentMonth).get()
+    state.db.collection('ingresos').where('mes', '==', state.currentMonth).get(),
+    state.db.collection('config').doc('categorias').get()
   ]);
 
   let configData = configSnap.exists ? configSnap.data() : null;
   if (!configData) {
     configData = await ensureConfigForMonth(state.currentMonth);
   }
+
+  state.categories = await ensureCategoriesConfig(configData, categoriesSnap);
 
   const allExpenses = expensesSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
   state.expenses = allExpenses
@@ -288,6 +466,8 @@ async function loadMonthData() {
     .sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
 
   renderConfigForm(configData);
+  renderCategorySelect();
+  renderCategoriesList();
   renderSummary(configData, state.expenses, state.incomes);
   renderHistory(allExpenses);
 }
@@ -312,6 +492,27 @@ async function ensureConfigForMonth(monthKey) {
 
   await configRef.set(payload, { merge: true });
   return payload;
+}
+
+async function ensureCategoriesConfig(configData, categoriesSnap) {
+  const categoriesRef = state.db.collection('config').doc('categorias');
+  if (categoriesSnap && categoriesSnap.exists && Array.isArray(categoriesSnap.data().items)) {
+    return normalizeCategories(categoriesSnap.data().items);
+  }
+
+  const defaults = DEFAULT_CATEGORY_DEFINITIONS.map((category) => ({
+    ...category,
+    tope: category.id === 'nafta'
+      ? Number(configData.topeNafta || 0)
+      : category.id === 'futbol'
+        ? Number(configData.topeFutbol || 0)
+        : category.id === 'compras'
+          ? Number(configData.topeCompras || 0)
+          : 0
+  }));
+
+  await categoriesRef.set({ items: defaults }, { merge: true });
+  return defaults;
 }
 
 function renderConfigForm(config) {
@@ -350,7 +551,7 @@ function renderSummary(config, expenses, incomes) {
     : (sueldo * Number(config.ahorroPct || 0)) / 100;
   const fixedAndSavingsTotal = fijos + deuda + ahorroAmount;
   const variableTotal = expenses
-    .filter((expense) => VARIABLE_CATEGORIES.includes(expense.categoria))
+    .filter((expense) => isActiveVariableCategory(expense.categoria))
     .reduce((sum, expense) => sum + Number(expense.monto || 0), 0);
   const remainingMargin = sueldo + ingresoExtraTotal - fixedAndSavingsTotal - variableTotal;
 
@@ -372,24 +573,19 @@ function renderSummary(config, expenses, incomes) {
     `)
     .join('');
 
-  const budgets = [
-    { key: 'topeNafta', label: 'NAFTA', category: 'NAFTA' },
-    { key: 'topeFutbol', label: 'FUTBOL', category: 'FUTBOL' },
-    { key: 'topeCompras', label: 'COMPRAS', category: 'COMPRAS' }
-  ];
-
+  const budgets = state.categories.filter((category) => category.activa !== false && category.tieneTope);
   document.getElementById('budgetSection').innerHTML = `
     <h3>Sobre de gastos</h3>
     ${budgets
-      .map((budget) => {
-        const spent = sumExpensesByCategory(expenses, budget.category);
-        const limit = Number(config[budget.key] || 0);
+      .map((category) => {
+        const spent = sumExpensesByCategory(expenses, category.id);
+        const limit = Number(category.tope || 0);
         const percent = limit > 0 ? (spent / limit) * 100 : 0;
         const className = percent > 100 ? 'danger' : percent > 80 ? 'warning' : '';
         return `
           <div class="progress-card">
             <div class="section-head compact">
-              <strong>${budget.label}</strong>
+              <strong>${category.nombre}</strong>
               <span>${formatCurrency(spent)} / ${formatCurrency(limit)}</span>
             </div>
             <div class="progress-bar ${className}">
@@ -401,8 +597,9 @@ function renderSummary(config, expenses, incomes) {
       .join('')}
   `;
 
+  const extraCategories = state.categories.filter((category) => category.activa !== false && !category.tieneTope);
   const extraSpent = expenses
-    .filter((expense) => ['COMIDA', 'OCIO', 'VARIOS'].includes(expense.categoria))
+    .filter((expense) => extraCategories.some((category) => matchesCategory(expense.categoria, category.id)))
     .reduce((sum, expense) => sum + Number(expense.monto || 0), 0);
 
   document.getElementById('extraSection').innerHTML = `
@@ -431,7 +628,7 @@ function renderMovements(expenses) {
       <div class="movement-item">
         <div>
           <strong>${expense.descripcion}</strong>
-          <div class="movement-meta">${formatDate(expense.fecha)} · ${CATEGORY_LABELS[expense.categoria] || expense.categoria}</div>
+          <div class="movement-meta">${formatDate(expense.fecha)} · ${getCategoryDisplayName(expense.categoria)}</div>
         </div>
         <div class="movement-meta">
           <div>${formatCurrency(expense.monto)}</div>
@@ -446,7 +643,7 @@ function renderHistory(expenses) {
   const months = getRecentMonths(6);
   const totals = {};
   expenses.forEach((expense) => {
-    if (VARIABLE_CATEGORIES.includes(expense.categoria)) {
+    if (isActiveVariableCategory(expense.categoria)) {
       totals[expense.mes] = (totals[expense.mes] || 0) + Number(expense.monto || 0);
     }
   });
@@ -499,9 +696,32 @@ function getAhorroSummaryText(config, ahorroAmount) {
   return `Ahorro: ${Number(config.ahorroPct || 0)}% (${formatCurrency(ahorroAmount)})`;
 }
 
+function isActiveVariableCategory(categoryValue) {
+  return state.categories.some((category) => matchesCategory(categoryValue, category.id));
+}
+
+function matchesCategory(categoryValue, categoryId) {
+  return normalizeCategoryValue(categoryValue) === normalizeCategoryValue(categoryId);
+}
+
+function normalizeCategoryValue(value) {
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[^a-z0-9]+/g, '');
+}
+
+function getCategoryDisplayName(categoryValue) {
+  const category = state.categories.find((item) => matchesCategory(categoryValue, item.id));
+  if (category) {
+    return category.nombre;
+  }
+  return CATEGORY_LABELS[normalizeCategoryValue(categoryValue).toUpperCase()] || String(categoryValue || 'Sin categoría');
+}
+
 function sumExpensesByCategory(expenses, category) {
   return expenses
-    .filter((expense) => expense.categoria === category)
+    .filter((expense) => matchesCategory(expense.categoria, category))
     .reduce((sum, expense) => sum + Number(expense.monto || 0), 0);
 }
 
