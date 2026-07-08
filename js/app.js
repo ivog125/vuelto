@@ -39,7 +39,9 @@ const state = {
   chart: null,
   expenses: [],
   incomes: [],
-  categories: []
+  categories: [],
+  tarjeta: [],
+  config: null
 };
 
 const firebaseConfig = {
@@ -149,6 +151,8 @@ function bindEvents(elements) {
   elements.tabRegisterBtn.addEventListener('click', () => showTab('register'));
   elements.tabSummaryBtn.addEventListener('click', () => showTab('summary'));
   elements.tabSettingsBtn.addEventListener('click', () => showTab('settings'));
+  elements.categoriesList.addEventListener('keydown', handleCategoryListKeydown);
+  elements.categoriesList.addEventListener('focusout', handleTopeInputBlur);
 }
 
 async function handleLogin(event) {
@@ -315,27 +319,84 @@ async function handleCategorySubmit(event) {
 
 async function handleCategoryListClick(event) {
   const button = event.target.closest('[data-category-action]');
-  if (!button) {
+  if (button) {
+    const id = button.dataset.categoryId;
+    const action = button.dataset.categoryAction;
+    if (action === 'edit') {
+      startEditingCategory(id);
+      return;
+    }
+
+    if (action === 'delete') {
+      const categories = state.categories.map((category) => (
+        category.id === id ? { ...category, activa: false } : category
+      ));
+      await getUserCategoriesDoc().set({ items: categories }, { merge: true });
+      state.categories = categories;
+      renderCategoriesList();
+      renderCategorySelect();
+      await loadMonthData();
+    }
     return;
   }
 
-  const id = button.dataset.categoryId;
-  const action = button.dataset.categoryAction;
-  if (action === 'edit') {
-    startEditingCategory(id);
+  const topeToggle = event.target.closest('[data-topes-edit-id]');
+  if (topeToggle) {
+    const categoryId = topeToggle.dataset.topesEditId;
+    const input = document.querySelector(`[data-topes-category-id="${categoryId}"]`);
+    if (input) {
+      topeToggle.classList.add('hidden');
+      input.classList.remove('hidden');
+      input.focus();
+      input.select();
+    }
+  }
+}
+
+function handleCategoryListKeydown(event) {
+  const input = event.target.closest('[data-topes-category-id]');
+  if (!input) return;
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    input.blur();
+  }
+}
+
+async function handleTopeInputBlur(event) {
+  const input = event.target.closest('[data-topes-category-id]');
+  if (!input) return;
+
+  const categoryId = input.dataset.topesCategoryId;
+  const display = document.querySelector(`[data-topes-edit-id="${categoryId}"]`);
+  input.classList.add('hidden');
+  if (display) {
+    display.classList.remove('hidden');
+  }
+  const newValue = Number(input.value || 0);
+  const existing = state.categories.find((category) => category.id === categoryId);
+  if (!existing || existing.tope === newValue) {
     return;
   }
 
-  if (action === 'delete') {
-    const categories = state.categories.map((category) => (
-      category.id === id ? { ...category, activa: false } : category
-    ));
-    await getUserCategoriesDoc().set({ items: categories }, { merge: true });
-    state.categories = categories;
-    renderCategoriesList();
-    renderCategorySelect();
-    await loadMonthData();
-  }
+  const categories = state.categories.map((category) => (
+    category.id === categoryId ? { ...category, tope: newValue } : category
+  ));
+  await getUserCategoriesDoc().set({ items: categories }, { merge: true });
+  state.categories = categories;
+  renderCategorySelect();
+  renderCategoriesList();
+  showSavedIndicator(categoryId);
+}
+
+function showSavedIndicator(categoryId) {
+  const indicator = document.querySelector(`[data-topes-saved-id="${categoryId}"]`);
+  if (!indicator) return;
+  // show with fade-in
+  indicator.classList.add('show');
+  // hide after 1.5s with fade-out
+  setTimeout(() => {
+    indicator.classList.remove('show');
+  }, 1500);
 }
 
 function showAuthenticatedView(elements) {
@@ -456,7 +517,23 @@ function renderCategoriesList() {
       <div class="category-item">
         <div>
           <strong>${category.nombre}</strong>
-          <div class="movement-meta">${category.tieneTope ? `Tope: ${formatCurrency(category.tope || 0)}` : 'Sin tope'}</div>
+          <div class="movement-meta">
+            ${category.tieneTope ? `
+              <span class="topes-inline">
+                <button type="button" class="topes-display" data-topes-edit-id="${category.id}">Tope: ${formatCurrency(category.tope || 0)}</button>
+                <input
+                  id="topes-input-${category.id}"
+                  type="number"
+                  class="topes-input hidden"
+                  data-topes-category-id="${category.id}"
+                  value="${category.tope || 0}"
+                  min="0"
+                  step="0.01"
+                />
+                <span class="topes-saved" data-topes-saved-id="${category.id}">✓</span>
+              </span>
+            ` : 'Sin tope'}
+          </div>
         </div>
         <div class="category-actions">
           <button class="ghost" type="button" data-category-action="edit" data-category-id="${category.id}">Editar</button>
