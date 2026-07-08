@@ -100,6 +100,35 @@ p {
   margin-bottom: 0.5rem;
 }
 
+.tabs {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+.tab-btn {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+.tab-btn.active {
+  background: var(--accent);
+  color: white;
+}
+
+.radio-row {
+  display: flex;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+}
+
+.radio-item {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--text);
+}
+
 .grid-2 {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -174,6 +203,12 @@ p {
 .summary-value {
   font-size: 1.15rem;
   font-weight: 700;
+}
+
+.summary-sub {
+  font-size: 0.82rem;
+  color: var(--muted);
+  margin-top: 0.25rem;
 }
 
 .summary-layout {

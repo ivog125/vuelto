@@ -15,6 +15,8 @@ const DEFAULT_CONFIG = {
   sueldo: 0,
   fijos: 0,
   deuda: 0,
+  ahorroModo: 'porcentaje',
+  ahorroMontoFijo: 0,
   ahorroPct: 0,
   topeNafta: 0,
   topeFutbol: 0,
@@ -27,7 +29,8 @@ const state = {
   user: null,
   currentMonth: getMonthKey(new Date()),
   chart: null,
-  expenses: []
+  expenses: [],
+  incomes: []
 };
 
 const firebaseConfig = {
@@ -51,11 +54,18 @@ function initializeApp() {
     authMessage: document.getElementById('authMessage'),
     saveConfigBtn: document.getElementById('saveConfigBtn'),
     expenseForm: document.getElementById('expenseForm'),
+    incomeForm: document.getElementById('incomeForm'),
     monthSelect: document.getElementById('monthSelect'),
     summaryCards: document.getElementById('summaryCards'),
     budgetSection: document.getElementById('budgetSection'),
     extraSection: document.getElementById('extraSection'),
-    movementsList: document.getElementById('movementsList')
+    movementsList: document.getElementById('movementsList'),
+    registerSection: document.getElementById('registerSection'),
+    summarySection: document.getElementById('summarySection'),
+    settingsSection: document.getElementById('settingsSection'),
+    tabRegisterBtn: document.getElementById('tabRegisterBtn'),
+    tabSummaryBtn: document.getElementById('tabSummaryBtn'),
+    tabSettingsBtn: document.getElementById('tabSettingsBtn')
   };
 
   if (firebaseConfig.apiKey.includes('YOUR_')) {
@@ -87,11 +97,15 @@ function bindEvents(elements) {
   elements.logoutBtn.addEventListener('click', handleLogout);
   elements.saveConfigBtn.addEventListener('click', handleSaveConfig);
   elements.expenseForm.addEventListener('submit', handleExpenseSubmit);
+  elements.incomeForm.addEventListener('submit', handleIncomeSubmit);
   elements.monthSelect.addEventListener('change', (event) => {
     state.currentMonth = event.target.value;
     loadMonthData();
   });
   elements.movementsList.addEventListener('click', handleDeleteMovement);
+  elements.tabRegisterBtn.addEventListener('click', () => showTab('register'));
+  elements.tabSummaryBtn.addEventListener('click', () => showTab('summary'));
+  elements.tabSettingsBtn.addEventListener('click', () => showTab('settings'));
 }
 
 async function handleLogin(event) {
@@ -139,6 +153,25 @@ async function handleExpenseSubmit(event) {
   await loadMonthData();
 }
 
+async function handleIncomeSubmit(event) {
+  event.preventDefault();
+  const payload = {
+    fecha: document.getElementById('incomeDate').value,
+    descripcion: document.getElementById('incomeDescription').value.trim(),
+    monto: Number(document.getElementById('incomeAmount').value),
+    mes: state.currentMonth
+  };
+
+  if (!payload.fecha || !payload.descripcion || !payload.monto) {
+    return;
+  }
+
+  await state.db.collection('ingresos').add(payload);
+  event.target.reset();
+  setDefaultDate();
+  await loadMonthData();
+}
+
 async function handleDeleteMovement(event) {
   const button = event.target.closest('[data-delete-id]');
   if (!button) {
@@ -153,6 +186,29 @@ function showAuthenticatedView(elements) {
   elements.authCard.classList.add('hidden');
   elements.app.classList.remove('hidden');
   elements.logoutBtn.classList.remove('hidden');
+}
+
+function showTab(tab) {
+  const registerSection = document.getElementById('registerSection');
+  const summarySection = document.getElementById('summarySection');
+  const settingsSection = document.getElementById('settingsSection');
+  const tabRegisterBtn = document.getElementById('tabRegisterBtn');
+  const tabSummaryBtn = document.getElementById('tabSummaryBtn');
+  const tabSettingsBtn = document.getElementById('tabSettingsBtn');
+
+  [registerSection, summarySection, settingsSection].forEach((section) => section.classList.add('hidden'));
+  [tabRegisterBtn, tabSummaryBtn, tabSettingsBtn].forEach((btn) => btn.classList.remove('active'));
+
+  if (tab === 'summary') {
+    summarySection.classList.remove('hidden');
+    tabSummaryBtn.classList.add('active');
+  } else if (tab === 'settings') {
+    settingsSection.classList.remove('hidden');
+    tabSettingsBtn.classList.add('active');
+  } else {
+    registerSection.classList.remove('hidden');
+    tabRegisterBtn.classList.add('active');
+  }
 }
 
 function showLoginView(elements) {
@@ -177,16 +233,28 @@ function populateMonthSelect(select) {
 }
 
 function setDefaultDate() {
-  const input = document.getElementById('expenseDate');
-  input.value = new Date().toISOString().slice(0, 10);
+  const today = new Date().toISOString().slice(0, 10);
+  document.getElementById('expenseDate').value = today;
+  document.getElementById('incomeDate').value = today;
 }
 
 function collectConfigValues() {
   const values = {};
   document.querySelectorAll('[data-config-field]').forEach((input) => {
     const key = input.dataset.configField;
+    if (input.type === 'radio') {
+      if (input.checked) {
+        values[key] = input.value;
+      }
+      return;
+    }
     values[key] = Number(input.value || 0);
   });
+
+  if (!values.ahorroModo) {
+    values.ahorroModo = 'porcentaje';
+  }
+
   return {
     ...DEFAULT_CONFIG,
     ...values,
@@ -200,9 +268,10 @@ async function loadMonthData() {
   }
 
   const historyMonths = getRecentMonths(6);
-  const [configSnap, expensesSnap] = await Promise.all([
+  const [configSnap, expensesSnap, incomesSnap] = await Promise.all([
     state.db.collection('config').doc(state.currentMonth).get(),
-    state.db.collection('gastos').where('mes', 'in', historyMonths).get()
+    state.db.collection('gastos').where('mes', 'in', historyMonths).get(),
+    state.db.collection('ingresos').where('mes', '==', state.currentMonth).get()
   ]);
 
   let configData = configSnap.exists ? configSnap.data() : null;
@@ -214,9 +283,12 @@ async function loadMonthData() {
   state.expenses = allExpenses
     .filter((expense) => expense.mes === state.currentMonth)
     .sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
+  state.incomes = incomesSnap.docs
+    .map((doc) => ({ id: doc.id, ...doc.data() }))
+    .sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
 
   renderConfigForm(configData);
-  renderSummary(configData, state.expenses);
+  renderSummary(configData, state.expenses, state.incomes);
   renderHistory(allExpenses);
 }
 
@@ -233,6 +305,8 @@ async function ensureConfigForMonth(monthKey) {
   const payload = {
     ...DEFAULT_CONFIG,
     ...source,
+    ahorroModo: source.ahorroModo || DEFAULT_CONFIG.ahorroModo,
+    ahorroMontoFijo: source.ahorroMontoFijo ?? DEFAULT_CONFIG.ahorroMontoFijo,
     mes: monthKey
   };
 
@@ -243,24 +317,47 @@ async function ensureConfigForMonth(monthKey) {
 function renderConfigForm(config) {
   document.querySelectorAll('[data-config-field]').forEach((input) => {
     const key = input.dataset.configField;
+    if (input.type === 'radio') {
+      input.checked = input.value === (config[key] || 'porcentaje');
+      return;
+    }
     input.value = config[key] ?? 0;
   });
+
+  const mode = config.ahorroModo === 'fijo' ? 'fijo' : 'porcentaje';
+  toggleAhorroFields(mode);
 }
 
-function renderSummary(config, expenses) {
+function toggleAhorroFields(mode) {
+  const fixedGroup = document.getElementById('ahorroFixedGroup');
+  const pctGroup = document.getElementById('ahorroPctGroup');
+  if (mode === 'fijo') {
+    fixedGroup.classList.remove('hidden');
+    pctGroup.classList.add('hidden');
+  } else {
+    fixedGroup.classList.add('hidden');
+    pctGroup.classList.remove('hidden');
+  }
+}
+
+function renderSummary(config, expenses, incomes) {
   const sueldo = Number(config.sueldo || 0);
   const fijos = Number(config.fijos || 0);
   const deuda = Number(config.deuda || 0);
-  const ahorroAmount = (sueldo * Number(config.ahorroPct || 0)) / 100;
+  const ingresoExtraTotal = incomes.reduce((sum, income) => sum + Number(income.monto || 0), 0);
+  const ahorroAmount = config.ahorroModo === 'fijo'
+    ? Number(config.ahorroMontoFijo || 0)
+    : (sueldo * Number(config.ahorroPct || 0)) / 100;
   const fixedAndSavingsTotal = fijos + deuda + ahorroAmount;
   const variableTotal = expenses
     .filter((expense) => VARIABLE_CATEGORIES.includes(expense.categoria))
     .reduce((sum, expense) => sum + Number(expense.monto || 0), 0);
-  const remainingMargin = sueldo - fixedAndSavingsTotal - variableTotal;
+  const remainingMargin = sueldo + ingresoExtraTotal - fixedAndSavingsTotal - variableTotal;
 
   const cards = [
     { label: 'Sueldo', value: formatCurrency(sueldo) },
-    { label: 'Fijos + deuda + ahorro', value: formatCurrency(fixedAndSavingsTotal) },
+    { label: 'Ingreso extra del mes', value: formatCurrency(ingresoExtraTotal) },
+    { label: 'Fijos + deuda + ahorro', value: formatCurrency(fixedAndSavingsTotal), subText: getAhorroSummaryText(config, ahorroAmount) },
     { label: 'Gasto variable', value: formatCurrency(variableTotal) },
     { label: 'Margen restante', value: formatCurrency(remainingMargin), negative: remainingMargin < 0 }
   ];
@@ -270,6 +367,7 @@ function renderSummary(config, expenses) {
       <div class="summary-card${card.negative ? ' negative' : ''}">
         <div class="summary-label">${card.label}</div>
         <div class="summary-value">${card.value}</div>
+        ${card.subText ? `<div class="summary-sub">${card.subText}</div>` : ''}
       </div>
     `)
     .join('');
@@ -392,6 +490,13 @@ function renderHistory(expenses) {
       }
     }
   });
+}
+
+function getAhorroSummaryText(config, ahorroAmount) {
+  if (config.ahorroModo === 'fijo') {
+    return `Ahorro: ${formatCurrency(ahorroAmount)} (monto fijo)`;
+  }
+  return `Ahorro: ${Number(config.ahorroPct || 0)}% (${formatCurrency(ahorroAmount)})`;
 }
 
 function sumExpensesByCategory(expenses, category) {

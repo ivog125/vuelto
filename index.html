@@ -34,81 +34,70 @@
       </section>
 
       <main id="app" class="hidden">
-        <section class="card">
-          <div class="section-head">
-            <h2>Configuración mensual</h2>
-            <button id="saveConfigBtn" class="primary" type="button">Guardar</button>
-          </div>
-          <div class="grid-2">
-            <label class="field">
-              <span>Sueldo</span>
-              <input id="sueldoInput" type="number" step="0.01" data-config-field="sueldo" />
-            </label>
-            <label class="field">
-              <span>Fijos</span>
-              <input id="fijosInput" type="number" step="0.01" data-config-field="fijos" />
-            </label>
-            <label class="field">
-              <span>Deuda</span>
-              <input id="deudaInput" type="number" step="0.01" data-config-field="deuda" />
-            </label>
-            <label class="field">
-              <span>Ahorro %</span>
-              <input id="ahorroPctInput" type="number" step="0.1" data-config-field="ahorroPct" />
-            </label>
-            <label class="field">
-              <span>Tope Nafta</span>
-              <input id="topeNaftaInput" type="number" step="0.01" data-config-field="topeNafta" />
-            </label>
-            <label class="field">
-              <span>Tope Fútbol</span>
-              <input id="topeFutbolInput" type="number" step="0.01" data-config-field="topeFutbol" />
-            </label>
-            <label class="field">
-              <span>Tope Compras</span>
-              <input id="topeComprasInput" type="number" step="0.01" data-config-field="topeCompras" />
-            </label>
-          </div>
-        </section>
+        <div class="tabs" role="tablist" aria-label="Secciones">
+          <button id="tabRegisterBtn" class="tab-btn active" type="button">Registrar</button>
+          <button id="tabSummaryBtn" class="tab-btn" type="button">Resumen</button>
+          <button id="tabSettingsBtn" class="tab-btn" type="button">Ajustes</button>
+        </div>
 
-        <section class="card">
+        <section id="registerSection" class="card">
           <div class="section-head">
-            <h2>Registrar gasto</h2>
+            <h2>Registrar</h2>
           </div>
-          <form id="expenseForm" class="stack">
-            <div class="grid-2">
+          <div class="stack">
+            <form id="expenseForm" class="stack">
+              <h3>Gasto</h3>
+              <div class="grid-2">
+                <label class="field">
+                  <span>Fecha</span>
+                  <input id="expenseDate" type="date" required />
+                </label>
+                <label class="field">
+                  <span>Categoría</span>
+                  <select id="expenseCategory">
+                    <option value="NAFTA">NAFTA</option>
+                    <option value="FUTBOL">FUTBOL</option>
+                    <option value="COMPRAS">COMPRAS</option>
+                    <option value="COMIDA">COMIDA</option>
+                    <option value="OCIO">OCIO</option>
+                    <option value="VARIOS">VARIOS</option>
+                    <option value="DEUDA">DEUDA</option>
+                    <option value="AHORRO">AHORRO</option>
+                    <option value="FIJOS">FIJOS</option>
+                  </select>
+                </label>
+              </div>
+              <label class="field">
+                <span>Descripción</span>
+                <input id="expenseDescription" type="text" maxlength="80" required />
+              </label>
+              <label class="field">
+                <span>Monto</span>
+                <input id="expenseAmount" type="number" step="0.01" min="0" required />
+              </label>
+              <button type="submit" class="primary">Guardar gasto</button>
+            </form>
+
+            <form id="incomeForm" class="stack">
+              <h3>Ingreso extra</h3>
               <label class="field">
                 <span>Fecha</span>
-                <input id="expenseDate" type="date" required />
+                <input id="incomeDate" type="date" required />
               </label>
               <label class="field">
-                <span>Categoría</span>
-                <select id="expenseCategory">
-                  <option value="NAFTA">NAFTA</option>
-                  <option value="FUTBOL">FUTBOL</option>
-                  <option value="COMPRAS">COMPRAS</option>
-                  <option value="COMIDA">COMIDA</option>
-                  <option value="OCIO">OCIO</option>
-                  <option value="VARIOS">VARIOS</option>
-                  <option value="DEUDA">DEUDA</option>
-                  <option value="AHORRO">AHORRO</option>
-                  <option value="FIJOS">FIJOS</option>
-                </select>
+                <span>Descripción</span>
+                <input id="incomeDescription" type="text" maxlength="80" required />
               </label>
-            </div>
-            <label class="field">
-              <span>Descripción</span>
-              <input id="expenseDescription" type="text" maxlength="80" required />
-            </label>
-            <label class="field">
-              <span>Monto</span>
-              <input id="expenseAmount" type="number" step="0.01" min="0" required />
-            </label>
-            <button type="submit" class="primary">Guardar gasto</button>
-          </form>
+              <label class="field">
+                <span>Monto</span>
+                <input id="incomeAmount" type="number" step="0.01" min="0" required />
+              </label>
+              <button type="submit" class="primary">Guardar ingreso</button>
+            </form>
+          </div>
         </section>
 
-        <section class="card">
+        <section id="summarySection" class="card hidden">
           <div class="section-head">
             <h2>Resumen del mes</h2>
             <label class="field inline">
@@ -126,6 +115,60 @@
               <h3>Movimientos</h3>
             </div>
             <div id="movementsList" class="movement-list"></div>
+          </div>
+        </section>
+
+        <section id="settingsSection" class="card hidden">
+          <div class="section-head">
+            <h2>Ajustes</h2>
+            <button id="saveConfigBtn" class="primary" type="button">Guardar</button>
+          </div>
+          <div class="grid-2">
+            <label class="field">
+              <span>Sueldo</span>
+              <input id="sueldoInput" type="number" step="0.01" data-config-field="sueldo" />
+            </label>
+            <label class="field">
+              <span>Fijos</span>
+              <input id="fijosInput" type="number" step="0.01" data-config-field="fijos" />
+            </label>
+            <label class="field">
+              <span>Deuda</span>
+              <input id="deudaInput" type="number" step="0.01" data-config-field="deuda" />
+            </label>
+            <div class="field">
+              <span>Método de ahorro</span>
+              <div class="radio-row">
+                <label class="radio-item">
+                  <input type="radio" name="ahorroModo" value="porcentaje" data-config-field="ahorroModo" checked />
+                  <span>Porcentaje</span>
+                </label>
+                <label class="radio-item">
+                  <input type="radio" name="ahorroModo" value="fijo" data-config-field="ahorroModo" />
+                  <span>Monto fijo</span>
+                </label>
+              </div>
+            </div>
+            <label id="ahorroPctGroup" class="field">
+              <span>Ahorro %</span>
+              <input id="ahorroPctInput" type="number" step="0.1" data-config-field="ahorroPct" />
+            </label>
+            <label id="ahorroFixedGroup" class="field hidden">
+              <span>Ahorro fijo</span>
+              <input id="ahorroMontoFijoInput" type="number" step="0.01" data-config-field="ahorroMontoFijo" />
+            </label>
+            <label class="field">
+              <span>Tope Nafta</span>
+              <input id="topeNaftaInput" type="number" step="0.01" data-config-field="topeNafta" />
+            </label>
+            <label class="field">
+              <span>Tope Fútbol</span>
+              <input id="topeFutbolInput" type="number" step="0.01" data-config-field="topeFutbol" />
+            </label>
+            <label class="field">
+              <span>Tope Compras</span>
+              <input id="topeComprasInput" type="number" step="0.01" data-config-field="topeCompras" />
+            </label>
           </div>
         </section>
 
