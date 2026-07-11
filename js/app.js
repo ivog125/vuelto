@@ -22,13 +22,16 @@ const DEFAULT_CATEGORY_DEFINITIONS = [
 const DEFAULT_CONFIG = {
   sueldo: 0,
   fijos: 0,
-  deuda: 0,
   ahorroModo: 'porcentaje',
   ahorroMontoFijo: 0,
-  ahorroPct: 0,
-  topeNafta: 0,
-  topeFutbol: 0,
-  topeCompras: 0
+  ahorroPct: 0
+};
+
+const DEFAULT_GENERAL_CONFIG = {
+  saldoInicialTarjeta: 0,
+  fechaCierre: null,
+  fechaVencimiento: null,
+  tieneDeuda: false
 };
 
 const state = {
@@ -41,7 +44,13 @@ const state = {
   incomes: [],
   categories: [],
   tarjeta: [],
-  config: null
+  tarjetaAll: [],
+  acreedores: [],
+  deuda: [],
+  deudaAll: [],
+  config: null,
+  generalConfig: null,
+  editingAcreedorId: null
 };
 
 const firebaseConfig = {
@@ -69,13 +78,23 @@ function initializeApp() {
     showLoginLink: document.getElementById('showLoginLink'),
     authMessage: document.getElementById('authMessage'),
     saveConfigBtn: document.getElementById('saveConfigBtn'),
+    saveGeneralConfigBtn: document.getElementById('saveGeneralConfigBtn'),
     expenseForm: document.getElementById('expenseForm'),
     incomeForm: document.getElementById('incomeForm'),
     tarjetaForm: document.getElementById('tarjetaForm'),
     tarjetaDate: document.getElementById('tarjetaDate'),
+    tarjetaTipo: document.getElementById('tarjetaTipo'),
     tarjetaDescription: document.getElementById('tarjetaDescription'),
     tarjetaAmount: document.getElementById('tarjetaAmount'),
+    tarjetaPagoCompletoInput: document.getElementById('tarjetaPagoCompletoInput'),
     tarjetaList: document.getElementById('tarjetaList'),
+    acreedorForm: document.getElementById('acreedorForm'),
+    acreedoresList: document.getElementById('acreedoresList'),
+    deudaForm: document.getElementById('deudaForm'),
+    deudaTipo: document.getElementById('deudaTipo'),
+    deudaAcreedor: document.getElementById('deudaAcreedor'),
+    deudaList: document.getElementById('deudaList'),
+    saveDeudaToggleBtn: document.getElementById('saveDeudaToggleBtn'),
     monthSelect: document.getElementById('monthSelect'),
     summaryCards: document.getElementById('summaryCards'),
     budgetSection: document.getElementById('budgetSection'),
@@ -94,6 +113,7 @@ function initializeApp() {
     settingsSection: document.getElementById('settingsSection'),
     tabRegisterBtn: document.getElementById('tabRegisterBtn'),
     tabTarjetaBtn: document.getElementById('tabTarjetaBtn'),
+    tabDeudaBtn: document.getElementById('tabDeudaBtn'),
     tabSummaryBtn: document.getElementById('tabSummaryBtn'),
     tabSettingsBtn: document.getElementById('tabSettingsBtn')
   };
@@ -110,6 +130,9 @@ function initializeApp() {
   bindEvents(appElements);
   populateMonthSelect(appElements.monthSelect);
   setDefaultDate();
+  toggleTarjetaDescription(appElements.tarjetaTipo?.value);
+  toggleDeudaDescription(appElements.deudaTipo?.value);
+  updateTarjetaPagoCompletoUI();
 
   state.auth.onAuthStateChanged((user) => {
     state.user = user;
@@ -136,8 +159,27 @@ function bindEvents(elements) {
   elements.tabTarjetaBtn?.addEventListener('click', () => showTab('tarjeta'));
   elements.tarjetaForm?.addEventListener('submit', handleTarjetaSubmit);
   elements.tarjetaList?.addEventListener('click', handleTarjetaListClick);
+  elements.tarjetaTipo?.addEventListener('change', (event) => {
+    toggleTarjetaDescription(event.target.value);
+    updateTarjetaPagoCompletoUI();
+  });
+  elements.tarjetaPagoCompletoInput?.addEventListener('change', handleTarjetaPagoCompletoChange);
+  elements.tabDeudaBtn?.addEventListener('click', () => showTab('deuda'));
+  elements.acreedorForm?.addEventListener('submit', handleAcreedorSubmit);
+  elements.acreedoresList?.addEventListener('click', handleAcreedorListClick);
+  elements.deudaForm?.addEventListener('submit', handleDeudaSubmit);
+  elements.deudaList?.addEventListener('click', handleDeudaListClick);
+  elements.deudaTipo?.addEventListener('change', (event) => toggleDeudaDescription(event.target.value));
+  elements.deudaAcreedor?.addEventListener('change', () => {
+    const tipoValue = document.getElementById('deudaTipo')?.value;
+    if (tipoValue === 'pago') {
+      toggleDeudaDescription('pago');
+    }
+  });
   elements.logoutBtn.addEventListener('click', handleLogout);
   elements.saveConfigBtn.addEventListener('click', handleSaveConfig);
+  elements.saveGeneralConfigBtn?.addEventListener('click', handleSaveGeneralConfig);
+  elements.saveDeudaToggleBtn?.addEventListener('click', handleSaveGeneralConfig);
   elements.expenseForm.addEventListener('submit', handleExpenseSubmit);
   elements.incomeForm.addEventListener('submit', handleIncomeSubmit);
   elements.monthSelect.addEventListener('change', (event) => {
@@ -151,8 +193,8 @@ function bindEvents(elements) {
   elements.tabRegisterBtn.addEventListener('click', () => showTab('register'));
   elements.tabSummaryBtn.addEventListener('click', () => showTab('summary'));
   elements.tabSettingsBtn.addEventListener('click', () => showTab('settings'));
-  elements.categoriesList.addEventListener('keydown', handleCategoryListKeydown);
-  elements.categoriesList.addEventListener('focusout', handleTopeInputBlur);
+  elements.categoriesList.addEventListener('input', handleCategoryListInput);
+  elements.categoriesList.addEventListener('change', handleCategoryListChange);
 }
 
 async function handleLogin(event) {
@@ -220,10 +262,24 @@ function getUserCategoriesDoc() {
   return getUserConfigDoc('categorias');
 }
 
+function getUserGeneralConfigDoc() {
+  return getUserConfigDoc('general');
+}
+
+function getUserAcreedoresDoc() {
+  return getUserConfigDoc('acreedores');
+}
+
 async function handleSaveConfig() {
   const payload = collectConfigValues();
   const configRef = getUserConfigDoc(state.currentMonth);
   await configRef.set(payload, { merge: true });
+  await loadMonthData();
+}
+
+async function handleSaveGeneralConfig() {
+  const payload = collectGeneralConfigValues();
+  await getUserGeneralConfigDoc().set(payload, { merge: true });
   await loadMonthData();
 }
 
@@ -337,42 +393,26 @@ async function handleCategoryListClick(event) {
       renderCategorySelect();
       await loadMonthData();
     }
-    return;
-  }
-
-  const topeToggle = event.target.closest('[data-topes-edit-id]');
-  if (topeToggle) {
-    const categoryId = topeToggle.dataset.topesEditId;
-    const input = document.querySelector(`[data-topes-category-id="${categoryId}"]`);
-    if (input) {
-      topeToggle.classList.add('hidden');
-      input.classList.remove('hidden');
-      input.focus();
-      input.select();
-    }
   }
 }
 
-function handleCategoryListKeydown(event) {
-  const input = event.target.closest('[data-topes-category-id]');
-  if (!input) return;
-  if (event.key === 'Enter') {
-    event.preventDefault();
-    input.blur();
+function handleCategoryListInput(event) {
+  const slider = event.target.closest('[data-tope-slider-id]');
+  if (!slider) return;
+
+  const categoryId = slider.dataset.topeSliderId;
+  const valueLabel = document.querySelector(`[data-tope-value-id="${categoryId}"]`);
+  if (valueLabel) {
+    valueLabel.textContent = formatCurrency(slider.value);
   }
 }
 
-async function handleTopeInputBlur(event) {
-  const input = event.target.closest('[data-topes-category-id]');
-  if (!input) return;
+async function handleCategoryListChange(event) {
+  const slider = event.target.closest('[data-tope-slider-id]');
+  if (!slider) return;
 
-  const categoryId = input.dataset.topesCategoryId;
-  const display = document.querySelector(`[data-topes-edit-id="${categoryId}"]`);
-  input.classList.add('hidden');
-  if (display) {
-    display.classList.remove('hidden');
-  }
-  const newValue = Number(input.value || 0);
+  const categoryId = slider.dataset.topeSliderId;
+  const newValue = Number(slider.value || 0);
   const existing = state.categories.find((category) => category.id === categoryId);
   if (!existing || existing.tope === newValue) {
     return;
@@ -384,7 +424,6 @@ async function handleTopeInputBlur(event) {
   await getUserCategoriesDoc().set({ items: categories }, { merge: true });
   state.categories = categories;
   renderCategorySelect();
-  renderCategoriesList();
   showSavedIndicator(categoryId);
 }
 
@@ -408,15 +447,17 @@ function showAuthenticatedView(elements) {
 function showTab(tab) {
   const registerSection = document.getElementById('registerSection');
   const tarjetaSection = document.getElementById('tarjetaSection');
+  const deudaSection = document.getElementById('deudaSection');
   const summarySection = document.getElementById('summarySection');
   const settingsSection = document.getElementById('settingsSection');
   const tabRegisterBtn = document.getElementById('tabRegisterBtn');
   const tabTarjetaBtn = document.getElementById('tabTarjetaBtn');
+  const tabDeudaBtn = document.getElementById('tabDeudaBtn');
   const tabSummaryBtn = document.getElementById('tabSummaryBtn');
   const tabSettingsBtn = document.getElementById('tabSettingsBtn');
 
-  [registerSection, tarjetaSection, summarySection, settingsSection].forEach((section) => section.classList.add('hidden'));
-  [tabRegisterBtn, tabTarjetaBtn, tabSummaryBtn, tabSettingsBtn].forEach((btn) => btn.classList.remove('active'));
+  [registerSection, tarjetaSection, deudaSection, summarySection, settingsSection].forEach((section) => section.classList.add('hidden'));
+  [tabRegisterBtn, tabTarjetaBtn, tabDeudaBtn, tabSummaryBtn, tabSettingsBtn].forEach((btn) => btn.classList.remove('active'));
 
   if (tab === 'summary') {
     summarySection.classList.remove('hidden');
@@ -424,12 +465,32 @@ function showTab(tab) {
   } else if (tab === 'tarjeta') {
     tarjetaSection.classList.remove('hidden');
     tabTarjetaBtn.classList.add('active');
+  } else if (tab === 'deuda') {
+    if (!state.generalConfig?.tieneDeuda) {
+      showTab('register');
+      return;
+    }
+    deudaSection.classList.remove('hidden');
+    tabDeudaBtn.classList.add('active');
   } else if (tab === 'settings') {
     settingsSection.classList.remove('hidden');
     tabSettingsBtn.classList.add('active');
   } else {
     registerSection.classList.remove('hidden');
     tabRegisterBtn.classList.add('active');
+  }
+}
+
+function updateDeudaTabVisibility() {
+  const tabDeudaBtn = document.getElementById('tabDeudaBtn');
+  const deudaSection = document.getElementById('deudaSection');
+  if (!tabDeudaBtn || !deudaSection) return;
+
+  const tieneDeuda = Boolean(state.generalConfig?.tieneDeuda);
+  tabDeudaBtn.classList.toggle('hidden', !tieneDeuda);
+
+  if (!tieneDeuda && !deudaSection.classList.contains('hidden')) {
+    showTab('register');
   }
 }
 
@@ -609,6 +670,13 @@ function renderCategorySelect() {
   }
 }
 
+function getTopeSliderMax(category) {
+  const sueldo = Number(state.config?.sueldo || 0);
+  const currentTope = Number(category.tope || 0);
+  const candidate = Math.max(sueldo, currentTope, 10000);
+  return Math.ceil(candidate / 1000) * 1000;
+}
+
 function renderCategoriesList() {
   const list = document.getElementById('categoriesList');
   const categories = state.categories.filter((category) => category.activa !== false);
@@ -621,30 +689,31 @@ function renderCategoriesList() {
   list.innerHTML = categories
     .map((category) => `
       <div class="category-item">
-        <div>
-          <strong>${category.nombre}</strong>
-          <div class="movement-meta">
-            ${category.tieneTope ? `
-              <span class="topes-inline">
-                <button type="button" class="topes-display" data-topes-edit-id="${category.id}">Tope: ${formatCurrency(category.tope || 0)}</button>
-                <input
-                  id="topes-input-${category.id}"
-                  type="number"
-                  class="topes-input hidden"
-                  data-topes-category-id="${category.id}"
-                  value="${category.tope || 0}"
-                  min="0"
-                  step="0.01"
-                />
-                <span class="topes-saved" data-topes-saved-id="${category.id}">✓</span>
-              </span>
-            ` : 'Sin tope'}
+        <div class="category-row">
+          <div>
+            <strong>${category.nombre}</strong>
+            ${!category.tieneTope ? '<div class="movement-meta">Sin tope</div>' : ''}
+          </div>
+          <div class="category-actions">
+            <button class="ghost" type="button" data-category-action="edit" data-category-id="${category.id}">Editar</button>
+            <button class="delete-btn" type="button" data-category-action="delete" data-category-id="${category.id}">Borrar</button>
           </div>
         </div>
-        <div class="category-actions">
-          <button class="ghost" type="button" data-category-action="edit" data-category-id="${category.id}">Editar</button>
-          <button class="delete-btn" type="button" data-category-action="delete" data-category-id="${category.id}">Borrar</button>
-        </div>
+        ${category.tieneTope ? `
+          <div class="tope-slider-row">
+            <input
+              type="range"
+              class="tope-slider"
+              data-tope-slider-id="${category.id}"
+              min="0"
+              max="${getTopeSliderMax(category)}"
+              step="500"
+              value="${category.tope || 0}"
+            />
+            <span class="tope-slider-value" data-tope-value-id="${category.id}">${formatCurrency(category.tope || 0)}</span>
+            <span class="topes-saved" data-topes-saved-id="${category.id}">✓</span>
+          </div>
+        ` : ''}
       </div>
     `)
     .join('');
@@ -671,6 +740,8 @@ function setDefaultDate() {
   document.getElementById('incomeDate').value = today;
   const tarjetaDateEl = document.getElementById('tarjetaDate');
   if (tarjetaDateEl) tarjetaDateEl.value = today;
+  const deudaDateEl = document.getElementById('deudaDate');
+  if (deudaDateEl) deudaDateEl.value = today;
 }
 
 function collectConfigValues() {
@@ -697,18 +768,51 @@ function collectConfigValues() {
   };
 }
 
+function collectGeneralConfigValues() {
+  const values = {};
+  document.querySelectorAll('[data-general-config-field]').forEach((input) => {
+    const key = input.dataset.generalConfigField;
+    if (input.type === 'checkbox') {
+      values[key] = input.checked;
+      return;
+    }
+    values[key] = input.value === '' ? null : Number(input.value);
+  });
+
+  return {
+    ...DEFAULT_GENERAL_CONFIG,
+    ...values
+  };
+}
+
 async function loadMonthData() {
   if (!state.user || !state.db) {
     return;
   }
 
   const historyMonths = getRecentMonths(6);
-  const [configSnap, expensesSnap, incomesSnap, categoriesSnap, tarjetaSnap] = await Promise.all([
+  const [
+    configSnap,
+    expensesSnap,
+    incomesSnap,
+    categoriesSnap,
+    tarjetaSnap,
+    tarjetaAllSnap,
+    generalConfigSnap,
+    acreedoresSnap,
+    deudaSnap,
+    deudaAllSnap
+  ] = await Promise.all([
     getUserConfigDoc(state.currentMonth).get(),
     getUserCollection('gastos').where('mes', 'in', historyMonths).get(),
     getUserCollection('ingresos').where('mes', '==', state.currentMonth).get(),
     getUserCategoriesDoc().get(),
-    getUserCollection('tarjeta').where('mes', '==', state.currentMonth).get()
+    getUserCollection('tarjeta').where('mes', '==', state.currentMonth).get(),
+    getUserCollection('tarjeta').get(),
+    getUserGeneralConfigDoc().get(),
+    getUserAcreedoresDoc().get(),
+    getUserCollection('deuda').where('mes', '==', state.currentMonth).get(),
+    getUserCollection('deuda').get()
   ]);
 
   let configData = configSnap.exists ? configSnap.data() : null;
@@ -716,11 +820,30 @@ async function loadMonthData() {
     configData = await ensureConfigForMonth(state.currentMonth);
   }
 
+  state.config = configData;
+
+  if (generalConfigSnap.exists) {
+    state.generalConfig = { ...DEFAULT_GENERAL_CONFIG, ...generalConfigSnap.data() };
+  } else {
+    state.generalConfig = { ...DEFAULT_GENERAL_CONFIG };
+    await getUserGeneralConfigDoc().set(state.generalConfig, { merge: true });
+  }
+
   state.categories = await ensureCategoriesConfig(configData, categoriesSnap);
 
   state.tarjeta = tarjetaSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }))
     .filter((t) => t.mes === state.currentMonth)
     .sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
+
+  state.tarjetaAll = tarjetaAllSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+
+  state.acreedores = await ensureAcreedoresConfig(acreedoresSnap);
+
+  state.deuda = deudaSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }))
+    .filter((item) => item.mes === state.currentMonth)
+    .sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
+
+  state.deudaAll = deudaAllSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
 
   const allExpenses = expensesSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
   state.expenses = allExpenses
@@ -731,11 +854,20 @@ async function loadMonthData() {
     .sort((a, b) => new Date(b.fecha) - new Date(a.fecha));
 
   renderConfigForm(configData);
+  renderGeneralConfigForm(state.generalConfig);
   renderCategorySelect();
   renderCategoriesList();
   renderSummary(configData, state.expenses, state.incomes);
   renderHistory(allExpenses);
   renderTarjetaMovements(state.tarjeta);
+  renderTarjetaSaldoPendiente();
+  updateTarjetaPagoCompletoUI();
+  renderAcreedoresList();
+  renderAcreedoresSaldos();
+  renderDeudaAcreedorSelect();
+  toggleDeudaDescription(document.getElementById('deudaTipo')?.value);
+  renderDeudaMovements(state.deuda);
+  updateDeudaTabVisibility();
 }
 
 async function ensureConfigForMonth(monthKey) {
@@ -781,6 +913,16 @@ async function ensureCategoriesConfig(configData, categoriesSnap) {
   return defaults;
 }
 
+async function ensureAcreedoresConfig(acreedoresSnap) {
+  const acreedoresRef = getUserAcreedoresDoc();
+  if (acreedoresSnap && acreedoresSnap.exists && Array.isArray(acreedoresSnap.data().items)) {
+    return normalizeAcreedores(acreedoresSnap.data().items);
+  }
+
+  await acreedoresRef.set({ items: [] }, { merge: true });
+  return [];
+}
+
 function renderConfigForm(config) {
   document.querySelectorAll('[data-config-field]').forEach((input) => {
     const key = input.dataset.configField;
@@ -793,6 +935,18 @@ function renderConfigForm(config) {
 
   const mode = config.ahorroModo === 'fijo' ? 'fijo' : 'porcentaje';
   toggleAhorroFields(mode);
+}
+
+function renderGeneralConfigForm(generalConfig) {
+  document.querySelectorAll('[data-general-config-field]').forEach((input) => {
+    const key = input.dataset.generalConfigField;
+    if (input.type === 'checkbox') {
+      input.checked = Boolean(generalConfig[key]);
+      return;
+    }
+    const value = generalConfig[key];
+    input.value = value === null || value === undefined ? '' : value;
+  });
 }
 
 function toggleAhorroFields(mode) {
@@ -810,22 +964,30 @@ function toggleAhorroFields(mode) {
 function renderSummary(config, expenses, incomes) {
   const sueldo = Number(config.sueldo || 0);
   const fijos = Number(config.fijos || 0);
-  const deuda = Number(config.deuda || 0);
-  const tarjetaTotal = (state.tarjeta || []).reduce((sum, t) => sum + Number(t.monto || 0), 0);
+  const tieneDeuda = Boolean(state.generalConfig?.tieneDeuda);
+  const deudaTotal = tieneDeuda
+    ? (state.deuda || [])
+        .filter((item) => getDeudaTipo(item) === 'pago')
+        .reduce((sum, item) => sum + Number(item.monto || 0), 0)
+    : 0;
+  const tarjetaTotal = (state.tarjeta || [])
+    .filter((t) => getTarjetaTipo(t) === 'pago')
+    .reduce((sum, t) => sum + Number(t.monto || 0), 0);
   const ingresoExtraTotal = incomes.reduce((sum, income) => sum + Number(income.monto || 0), 0);
   const ahorroAmount = config.ahorroModo === 'fijo'
     ? Number(config.ahorroMontoFijo || 0)
     : (sueldo * Number(config.ahorroPct || 0)) / 100;
-  const fixedAndSavingsTotal = fijos + tarjetaTotal + deuda + ahorroAmount;
+  const fixedAndSavingsTotal = fijos + tarjetaTotal + deudaTotal + ahorroAmount;
   const variableTotal = expenses
     .filter((expense) => isActiveVariableCategory(expense.categoria))
     .reduce((sum, expense) => sum + Number(expense.monto || 0), 0);
   const remainingMargin = sueldo + ingresoExtraTotal - fixedAndSavingsTotal - variableTotal;
+  const fixedLabel = tieneDeuda ? 'Fijos + tarjeta + deuda + ahorro' : 'Fijos + tarjeta + ahorro';
 
   const cards = [
     { label: 'Sueldo', value: formatCurrency(sueldo) },
     { label: 'Ingreso extra del mes', value: formatCurrency(ingresoExtraTotal) },
-    { label: 'Fijos + tarjeta + deuda + ahorro', value: formatCurrency(fixedAndSavingsTotal), subText: getAhorroSummaryText(config, ahorroAmount) },
+    { label: fixedLabel, value: formatCurrency(fixedAndSavingsTotal), subText: getAhorroSummaryText(config, ahorroAmount) },
     { label: 'Gasto variable', value: formatCurrency(variableTotal) },
     { label: 'Margen restante', value: formatCurrency(remainingMargin), negative: remainingMargin < 0 }
   ];
@@ -906,6 +1068,68 @@ function renderMovements(expenses) {
     .join('');
 }
 
+function getTarjetaTipo(item) {
+  return item && item.tipo === 'pago' ? 'pago' : 'cargo';
+}
+
+function calcularSaldoPendienteTarjeta() {
+  const saldoInicial = Number(state.generalConfig?.saldoInicialTarjeta || 0);
+  const totales = (state.tarjetaAll || []).reduce((acc, item) => {
+    const monto = Number(item.monto || 0);
+    if (getTarjetaTipo(item) === 'pago') {
+      acc.pagos += monto;
+    } else {
+      acc.cargos += monto;
+    }
+    return acc;
+  }, { cargos: 0, pagos: 0 });
+
+  return saldoInicial + totales.cargos - totales.pagos;
+}
+
+function renderTarjetaSaldoPendiente() {
+  const el = document.getElementById('tarjetaSaldoPendiente');
+  if (!el) return;
+  const saldoPendiente = calcularSaldoPendienteTarjeta();
+  el.classList.toggle('negative', saldoPendiente > 0);
+  el.innerHTML = `
+    <div class="summary-label">Saldo pendiente de tarjeta</div>
+    <div class="summary-value">${formatCurrency(saldoPendiente)}</div>
+  `;
+}
+
+function updateTarjetaPagoCompletoUI() {
+  const group = document.getElementById('tarjetaPagoCompletoGroup');
+  const checkbox = document.getElementById('tarjetaPagoCompletoInput');
+  const tipoInput = document.getElementById('tarjetaTipo');
+  if (!group || !checkbox || !tipoInput) return;
+
+  const tipo = tipoInput.value === 'pago' ? 'pago' : 'cargo';
+  const disponible = calcularSaldoPendienteTarjeta() > 0;
+
+  group.classList.toggle('hidden', tipo !== 'pago');
+  checkbox.disabled = !disponible;
+  if (!disponible && checkbox.checked) {
+    checkbox.checked = false;
+  }
+}
+
+function handleTarjetaPagoCompletoChange(event) {
+  const checkbox = event.target;
+  if (!checkbox.checked) return;
+
+  const saldoPendiente = calcularSaldoPendienteTarjeta();
+  if (saldoPendiente <= 0) {
+    checkbox.checked = false;
+    return;
+  }
+
+  const amountInput = document.getElementById('tarjetaAmount');
+  if (amountInput) {
+    amountInput.value = saldoPendiente;
+  }
+}
+
 function renderTarjetaMovements(tarjeta) {
   const list = document.getElementById('tarjetaList');
   if (!tarjeta || !tarjeta.length) {
@@ -914,26 +1138,59 @@ function renderTarjetaMovements(tarjeta) {
   }
 
   list.innerHTML = tarjeta
-    .map((item) => `
+    .map((item) => {
+      const tipo = getTarjetaTipo(item);
+      const tipoLabel = tipo === 'pago' ? 'Pago' : 'Cargo';
+      return `
       <div class="movement-item">
         <div>
           <strong>${item.descripcion}</strong>
-          <div class="movement-meta">${formatDate(item.fecha)}</div>
+          <div class="movement-meta">
+            <span class="tarjeta-tipo tarjeta-tipo-${tipo}">${tipoLabel}</span>
+            ${formatDate(item.fecha)}
+          </div>
         </div>
         <div class="movement-meta">
           <div>${formatCurrency(item.monto)}</div>
           <button class="delete-btn" type="button" data-tarjeta-delete-id="${item.id}">Borrar</button>
         </div>
       </div>
-    `)
+    `;
+    })
     .join('');
+}
+
+function toggleTarjetaDescription(tipo) {
+  const group = document.getElementById('tarjetaDescriptionGroup');
+  const input = document.getElementById('tarjetaDescription');
+  if (!group || !input) return;
+
+  const isPago = tipo === 'pago';
+  group.classList.toggle('hidden', isPago);
+  input.required = !isPago;
+  if (isPago) {
+    input.value = 'Pago de tarjeta';
+  }
 }
 
 async function handleTarjetaSubmit(event) {
   event.preventDefault();
+  const tipoInput = document.getElementById('tarjetaTipo');
+  const tipo = tipoInput && tipoInput.value === 'pago' ? 'pago' : 'cargo';
+  const descriptionInput = document.getElementById('tarjetaDescription');
+  const descripcion = tipo === 'pago'
+    ? 'Pago de tarjeta'
+    : descriptionInput.value.trim();
+
+  if (tipo === 'pago') {
+    descriptionInput.required = false;
+    descriptionInput.value = descripcion;
+  }
+
   const payload = {
     fecha: document.getElementById('tarjetaDate').value,
-    descripcion: document.getElementById('tarjetaDescription').value.trim(),
+    tipo,
+    descripcion,
     monto: Number(document.getElementById('tarjetaAmount').value),
     mes: state.currentMonth
   };
@@ -945,6 +1202,8 @@ async function handleTarjetaSubmit(event) {
   await getUserCollection('tarjeta').add(payload);
   event.target.reset();
   setDefaultDate();
+  toggleTarjetaDescription(tipoInput ? tipoInput.value : 'cargo');
+  updateTarjetaPagoCompletoUI();
   await loadMonthData();
 }
 
@@ -953,6 +1212,316 @@ async function handleTarjetaListClick(event) {
   if (!button) return;
   const id = button.dataset.tarjetaDeleteId;
   await getUserCollection('tarjeta').doc(id).delete();
+  await loadMonthData();
+}
+
+function getAcreedorDisplayName(acreedorId) {
+  const acreedor = state.acreedores.find((item) => item.id === acreedorId);
+  return acreedor ? acreedor.nombre : 'Acreedor eliminado';
+}
+
+function calcularSaldoPendientePorAcreedor() {
+  const totalesPorAcreedor = {};
+  (state.deudaAll || []).forEach((item) => {
+    const acreedorId = item.acreedorId;
+    if (!acreedorId) return;
+    if (!totalesPorAcreedor[acreedorId]) {
+      totalesPorAcreedor[acreedorId] = { cargos: 0, pagos: 0 };
+    }
+    const monto = Number(item.monto || 0);
+    if (getDeudaTipo(item) === 'pago') {
+      totalesPorAcreedor[acreedorId].pagos += monto;
+    } else {
+      totalesPorAcreedor[acreedorId].cargos += monto;
+    }
+  });
+
+  return state.acreedores
+    .filter((acreedor) => acreedor.activa !== false)
+    .map((acreedor) => {
+      const totales = totalesPorAcreedor[acreedor.id] || { cargos: 0, pagos: 0 };
+      const saldoInicial = Number(acreedor.saldoInicial || 0);
+      const saldoPendiente = saldoInicial + totales.cargos - totales.pagos;
+      return { ...acreedor, saldoPendiente };
+    });
+}
+
+function renderAcreedoresSaldos() {
+  const container = document.getElementById('acreedoresSaldos');
+  if (!container) return;
+
+  const acreedoresActivos = state.acreedores.filter((acreedor) => acreedor.activa !== false);
+  if (!acreedoresActivos.length) {
+    container.innerHTML = '<p class="message">Todavía no cargaste ningún acreedor. Agregá el primero más abajo para empezar a llevar el saldo.</p>';
+    return;
+  }
+
+  const saldos = calcularSaldoPendientePorAcreedor();
+  container.innerHTML = saldos
+    .map((acreedor) => `
+      <div class="summary-card${acreedor.saldoPendiente > 0 ? ' negative' : ''}">
+        <div class="summary-label">${acreedor.nombre}</div>
+        <div class="summary-value">${formatCurrency(acreedor.saldoPendiente)}</div>
+      </div>
+    `)
+    .join('');
+}
+
+function renderAcreedoresList() {
+  const list = document.getElementById('acreedoresList');
+  if (!list) return;
+  const acreedores = state.acreedores.filter((acreedor) => acreedor.activa !== false);
+
+  if (!acreedores.length) {
+    list.innerHTML = '<p class="message">Todavía no hay acreedores cargados.</p>';
+    return;
+  }
+
+  list.innerHTML = acreedores
+    .map((acreedor) => `
+      <div class="category-item">
+        <div class="category-row">
+          <div>
+            <strong>${acreedor.nombre}</strong>
+            <div class="movement-meta">Saldo inicial: ${formatCurrency(acreedor.saldoInicial || 0)}</div>
+          </div>
+          <div class="category-actions">
+            <button class="ghost" type="button" data-acreedor-action="edit" data-acreedor-id="${acreedor.id}">Editar</button>
+            <button class="delete-btn" type="button" data-acreedor-action="delete" data-acreedor-id="${acreedor.id}">Borrar</button>
+          </div>
+        </div>
+      </div>
+    `)
+    .join('');
+}
+
+async function handleAcreedorSubmit(event) {
+  event.preventDefault();
+  const name = document.getElementById('acreedorNombreInput').value.trim();
+  const saldoInicial = Number(document.getElementById('acreedorSaldoInicialInput').value || 0);
+
+  if (!name) {
+    return;
+  }
+
+  const acreedores = [
+    ...state.acreedores,
+    {
+      id: buildAcreedorId(name, state.acreedores),
+      nombre: name,
+      saldoInicial,
+      activa: true
+    }
+  ];
+
+  await getUserAcreedoresDoc().set({ items: acreedores }, { merge: true });
+  event.target.reset();
+  await loadMonthData();
+}
+
+async function handleAcreedorListClick(event) {
+  const button = event.target.closest('[data-acreedor-action]');
+  if (!button) return;
+
+  const id = button.dataset.acreedorId;
+  const action = button.dataset.acreedorAction;
+
+  if (action === 'edit') {
+    startInlineEditingAcreedor(id);
+    return;
+  }
+
+  if (action === 'delete') {
+    const acreedores = state.acreedores.map((acreedor) => (
+      acreedor.id === id ? { ...acreedor, activa: false } : acreedor
+    ));
+    await getUserAcreedoresDoc().set({ items: acreedores }, { merge: true });
+    await loadMonthData();
+  }
+}
+
+function closeAcreedorInlineEditor() {
+  const existing = document.getElementById('inline-acreedor-editor');
+  if (existing) existing.remove();
+  state.editingAcreedorId = null;
+}
+
+function startInlineEditingAcreedor(acreedorId) {
+  closeAcreedorInlineEditor();
+
+  const acreedor = state.acreedores.find((item) => item.id === acreedorId);
+  if (!acreedor) return;
+
+  state.editingAcreedorId = acreedorId;
+
+  const triggerBtn = document.querySelector(`button[data-acreedor-id="${acreedorId}"]`);
+  const row = triggerBtn ? triggerBtn.closest('.category-item') : null;
+  if (!row) return;
+
+  const container = document.createElement('div');
+  container.id = 'inline-acreedor-editor';
+  container.className = 'card inline-editor';
+  container.innerHTML = `
+    <form id="inline-acreedor-form-${acreedorId}" class="inline-category-form">
+      <div class="grid-2">
+        <div class="field">
+          <label>Nombre</label>
+          <input type="text" name="name" value="${escapeHtml(acreedor.nombre)}" />
+        </div>
+        <div class="field">
+          <label>Saldo inicial</label>
+          <input type="number" name="saldoInicial" value="${acreedor.saldoInicial || 0}" step="0.01" />
+        </div>
+      </div>
+      <div style="display:flex;gap:0.6rem;margin-top:0.6rem;">
+        <button type="submit" class="primary">Guardar</button>
+        <button type="button" class="ghost" id="inline-acreedor-cancel-btn">Cancelar</button>
+      </div>
+    </form>
+  `;
+
+  row.insertAdjacentElement('afterend', container);
+
+  const form = container.querySelector('form');
+  const nameInput = form.querySelector('input[name="name"]');
+  const saldoInput = form.querySelector('input[name="saldoInicial"]');
+  nameInput.focus();
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const name = nameInput.value.trim();
+    const saldoInicial = Number(saldoInput.value || 0);
+
+    if (!name) return;
+
+    const acreedores = [...state.acreedores];
+    const index = acreedores.findIndex((item) => item.id === acreedorId);
+    if (index >= 0) {
+      acreedores[index] = {
+        ...acreedores[index],
+        nombre: name,
+        saldoInicial,
+        activa: acreedores[index].activa !== false
+      };
+    }
+
+    await getUserAcreedoresDoc().set({ items: acreedores }, { merge: true });
+    closeAcreedorInlineEditor();
+    await loadMonthData();
+  });
+
+  container.querySelector('#inline-acreedor-cancel-btn').addEventListener('click', () => {
+    closeAcreedorInlineEditor();
+  });
+}
+
+function renderDeudaAcreedorSelect() {
+  const select = document.getElementById('deudaAcreedor');
+  if (!select) return;
+
+  const previousValue = select.value;
+  const activeAcreedores = state.acreedores.filter((acreedor) => acreedor.activa !== false);
+  select.innerHTML = activeAcreedores
+    .map((acreedor) => `<option value="${acreedor.id}">${acreedor.nombre}</option>`)
+    .join('');
+
+  if (activeAcreedores.some((acreedor) => acreedor.id === previousValue)) {
+    select.value = previousValue;
+  } else if (activeAcreedores.length) {
+    select.value = activeAcreedores[0].id;
+  }
+}
+
+function getDeudaTipo(item) {
+  return item && item.tipo === 'cargo' ? 'cargo' : 'pago';
+}
+
+function renderDeudaMovements(deuda) {
+  const list = document.getElementById('deudaList');
+  if (!list) return;
+
+  if (!deuda || !deuda.length) {
+    list.innerHTML = '<p class="message">Todavía no hay movimientos de deuda en este mes.</p>';
+    return;
+  }
+
+  list.innerHTML = deuda
+    .map((item) => {
+      const tipo = getDeudaTipo(item);
+      const tipoLabel = tipo === 'pago' ? 'Pago' : 'Cargo';
+      return `
+      <div class="movement-item">
+        <div>
+          <strong>${item.descripcion}</strong>
+          <div class="movement-meta">
+            <span class="tarjeta-tipo tarjeta-tipo-${tipo}">${tipoLabel}</span>
+            ${formatDate(item.fecha)} · ${getAcreedorDisplayName(item.acreedorId)}
+          </div>
+        </div>
+        <div class="movement-meta">
+          <div>${formatCurrency(item.monto)}</div>
+          <button class="delete-btn" type="button" data-deuda-delete-id="${item.id}">Borrar</button>
+        </div>
+      </div>
+    `;
+    })
+    .join('');
+}
+
+function toggleDeudaDescription(tipo) {
+  const group = document.getElementById('deudaDescriptionGroup');
+  const input = document.getElementById('deudaDescription');
+  if (!group || !input) return;
+
+  const isPago = tipo === 'pago';
+  group.classList.toggle('hidden', isPago);
+  input.required = !isPago;
+  if (isPago) {
+    const acreedorId = document.getElementById('deudaAcreedor')?.value;
+    input.value = `Pago a ${getAcreedorDisplayName(acreedorId)}`;
+  }
+}
+
+async function handleDeudaSubmit(event) {
+  event.preventDefault();
+  const acreedorId = document.getElementById('deudaAcreedor').value;
+  const tipoInput = document.getElementById('deudaTipo');
+  const tipo = tipoInput && tipoInput.value === 'cargo' ? 'cargo' : 'pago';
+  const descriptionInput = document.getElementById('deudaDescription');
+  const descripcion = tipo === 'pago'
+    ? `Pago a ${getAcreedorDisplayName(acreedorId)}`
+    : descriptionInput.value.trim();
+
+  if (tipo === 'pago') {
+    descriptionInput.required = false;
+    descriptionInput.value = descripcion;
+  }
+
+  const payload = {
+    fecha: document.getElementById('deudaDate').value,
+    acreedorId,
+    tipo,
+    descripcion,
+    monto: Number(document.getElementById('deudaAmount').value),
+    mes: state.currentMonth
+  };
+
+  if (!payload.fecha || !payload.acreedorId || !payload.descripcion || !payload.monto) {
+    return;
+  }
+
+  await getUserCollection('deuda').add(payload);
+  event.target.reset();
+  setDefaultDate();
+  toggleDeudaDescription(tipoInput ? tipoInput.value : 'pago');
+  await loadMonthData();
+}
+
+async function handleDeudaListClick(event) {
+  const button = event.target.closest('[data-deuda-delete-id]');
+  if (!button) return;
+  const id = button.dataset.deudaDeleteId;
+  await getUserCollection('deuda').doc(id).delete();
   await loadMonthData();
 }
 
@@ -1057,6 +1626,58 @@ function normalizeCategories(items) {
       activa: item?.activa !== false
     };
   });
+}
+
+function normalizeAcreedores(items) {
+  if (!Array.isArray(items)) {
+    return [];
+  }
+
+  const seenIds = new Set();
+  return items.map((item, index) => {
+    const rawName = String(item?.nombre || '').trim();
+    const nombre = rawName || `Acreedor ${index + 1}`;
+    const rawId = String(item?.id || nombre).trim();
+    const baseId = normalizeCategoryValue(rawId) || `acreedor${index + 1}`;
+
+    let id = baseId;
+    let suffix = 2;
+    while (seenIds.has(id)) {
+      id = `${baseId}${suffix}`;
+      suffix += 1;
+    }
+    seenIds.add(id);
+
+    return {
+      ...item,
+      id,
+      nombre,
+      saldoInicial: Number(item?.saldoInicial || 0),
+      activa: item?.activa !== false
+    };
+  });
+}
+
+function buildAcreedorId(name, acreedores) {
+  const base = name
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[^a-z0-9]+/g, '')
+    .slice(0, 20);
+
+  const baseId = base || 'acreedor';
+  const existingIds = acreedores.map((acreedor) => acreedor.id);
+  if (!existingIds.includes(baseId)) {
+    return baseId;
+  }
+
+  let suffix = 2;
+  let candidate = `${baseId}${suffix}`;
+  while (existingIds.includes(candidate)) {
+    suffix += 1;
+    candidate = `${baseId}${suffix}`;
+  }
+  return candidate;
 }
 
 function getCategoryDisplayName(categoryValue) {
