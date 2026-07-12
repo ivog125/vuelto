@@ -21,6 +21,7 @@
 
 body {
   margin: 0;
+  font-size: 16px;
   font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   background: var(--bg);
   color: var(--text);
@@ -510,5 +511,47 @@ canvas {
 
   .app-shell {
     padding: 0.8rem;
+  }
+}
+
+@media (max-width: 600px) {
+  /* 1. Nav de pestañas: scroll horizontal en vez de achicar/cortar botones */
+  .tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scroll-behavior: smooth;
+    padding-bottom: 0.2rem;
+  }
+
+  .tab-btn {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+
+  /* 3. Inputs/selects: alto táctil mínimo y fuente >=16px (evita el zoom automático de iOS).
+     Se excluyen checkbox/radio para no agrandar esos controles. */
+  input:not([type="checkbox"]):not([type="radio"]),
+  select {
+    font-size: 16px;
+    min-height: 44px;
+  }
+
+  /* 4. Filas de movimientos: la descripción se trunca en vez de forzar scroll horizontal */
+  .movement-item > div:first-child {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+
+  .movement-item > div:first-child strong,
+  .movement-item > div:first-child .movement-meta {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .movement-item > div:last-child {
+    flex: 0 0 auto;
   }
 }
